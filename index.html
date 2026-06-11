@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Renewal Studio — リニューアル設計</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+</head>
+<body>
+  <div class="studio">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">R</span>
+        <div>
+          <strong>Renewal Studio</strong>
+          <span class="brand-sub">経堂リニューアル設計</span>
+        </div>
+      </div>
+
+      <div class="topbar-group">
+        <label class="topbar-label">図面
+          <select id="drawing-select"></select>
+        </label>
+        <button class="btn btn-ghost btn-sm" id="btn-prev-page" disabled>←</button>
+        <span id="page-info" class="page-info">—</span>
+        <button class="btn btn-ghost btn-sm" id="btn-next-page" disabled>→</button>
+      </div>
+
+      <div class="topbar-group tools">
+        <button class="tool-btn active" data-tool="select" title="選択・移動">↖ 選択</button>
+        <button class="tool-btn" data-tool="pen" title="フリーハンド">✏ ペン</button>
+        <button class="tool-btn" data-tool="line" title="直線">／ 線</button>
+        <button class="tool-btn" data-tool="rect" title="矩形">□ 枠</button>
+        <button class="tool-btn" data-tool="text" title="テキスト">T 文字</button>
+      </div>
+
+      <div class="topbar-group">
+        <button class="btn btn-ghost btn-sm" id="btn-zoom-out">−</button>
+        <button class="btn btn-ghost btn-sm" id="btn-zoom-fit">全体</button>
+        <button class="btn btn-ghost btn-sm" id="btn-zoom-in">＋</button>
+        <button class="btn btn-ghost btn-sm" id="btn-undo">↩ 戻す</button>
+        <button class="btn btn-primary btn-sm" id="btn-save">保存</button>
+        <button class="btn btn-primary btn-sm" id="btn-export">PNG出力</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="palette-panel">
+        <div class="panel-title">パーツ</div>
+        <p class="panel-hint">クリック or ドラッグで図面に配置</p>
+        <div id="palette"></div>
+        <button class="btn btn-danger btn-block" id="btn-clear-objects">配置をすべて消去</button>
+      </aside>
+
+      <div class="canvas-area">
+        <div id="canvas-wrap" class="canvas-wrap">
+          <canvas id="design-canvas"></canvas>
+        </div>
+        <footer id="status" class="status-bar">準備中…</footer>
+      </div>
+
+      <aside class="props-panel">
+        <div class="panel-title">プロパティ</div>
+        <div id="props-content">
+          <p class="props-empty">オブジェクトを選択すると<br>回転・削除ができます</p>
+        </div>
+        <label class="prop-label">回転
+          <input type="range" id="prop-rotation" min="0" max="360" value="0" />
+        </label>
+        <button class="btn btn-ghost btn-block" id="btn-delete">選択を削除</button>
+        <div class="help-box">
+          <p><strong>使い方</strong></p>
+          <ul>
+            <li>パーツをドラッグして機器を配置</li>
+            <li>ペン・線でデッサン</li>
+            <li>「撤去」「残す」で方針をマーク</li>
+            <li>設計は自動保存（ブラウザ内）</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script type="module" src="js/designer.js"></script>
+</body>
+</html>
