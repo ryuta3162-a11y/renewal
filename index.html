@@ -28,27 +28,31 @@
       </div>
 
       <div class="topbar-group tools">
-        <button class="tool-btn active" data-tool="select" title="選択・移動">↖ 選択</button>
-        <button class="tool-btn" data-tool="pen" title="フリーハンド">✏ ペン</button>
+        <button class="tool-btn active" data-tool="select" title="選択・移動 (V)">↖ 選択</button>
+        <button class="tool-btn" data-tool="place" title="パーツをドラッグして配置">⊞ 配置</button>
+        <button class="tool-btn" data-tool="pen" title="フリーハンド (P)">✏ ペン</button>
         <button class="tool-btn" data-tool="line" title="直線">／ 線</button>
         <button class="tool-btn" data-tool="rect" title="矩形">□ 枠</button>
-        <button class="tool-btn" data-tool="text" title="テキスト">T 文字</button>
+        <button class="tool-btn" data-tool="pan" title="スペース+ドラッグでも移動">✋ 移動</button>
       </div>
 
       <div class="topbar-group">
         <button class="btn btn-ghost btn-sm" id="btn-zoom-out">−</button>
         <button class="btn btn-ghost btn-sm" id="btn-zoom-fit">全体</button>
         <button class="btn btn-ghost btn-sm" id="btn-zoom-in">＋</button>
-        <button class="btn btn-ghost btn-sm" id="btn-undo">↩ 戻す</button>
+        <button class="btn btn-ghost btn-sm" id="btn-undo">↩</button>
         <button class="btn btn-primary btn-sm" id="btn-save">保存</button>
-        <button class="btn btn-primary btn-sm" id="btn-export">PNG出力</button>
+        <button class="btn btn-primary btn-sm" id="btn-export">PNG</button>
       </div>
     </header>
 
     <div class="workspace">
       <aside class="palette-panel">
-        <div class="panel-title">パーツ</div>
-        <p class="panel-hint">クリック or ドラッグで図面に配置</p>
+        <div class="panel-header-row">
+          <div class="panel-title">パーツ</div>
+          <button class="btn btn-primary btn-xs" id="btn-new-part">＋ 自作</button>
+        </div>
+        <p class="panel-hint">選択 → 図面上をドラッグしてサイズ調整・試着</p>
         <div id="palette"></div>
         <button class="btn btn-danger btn-block" id="btn-clear-objects">配置をすべて消去</button>
       </aside>
@@ -56,6 +60,7 @@
       <div class="canvas-area">
         <div id="canvas-wrap" class="canvas-wrap">
           <canvas id="design-canvas"></canvas>
+          <div id="memo-tooltip" class="memo-tooltip" hidden></div>
         </div>
         <footer id="status" class="status-bar">準備中…</footer>
       </div>
@@ -63,24 +68,144 @@
       <aside class="props-panel">
         <div class="panel-title">プロパティ</div>
         <div id="props-content">
-          <p class="props-empty">オブジェクトを選択すると<br>回転・削除ができます</p>
+          <p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>
         </div>
-        <label class="prop-label">回転
-          <input type="range" id="prop-rotation" min="0" max="360" value="0" />
-        </label>
+        <div id="props-form" hidden>
+          <label class="prop-field">名称
+            <input type="text" id="prop-label" />
+          </label>
+          <div class="prop-row">
+            <label class="prop-field">幅 (px)
+              <input type="number" id="prop-width" min="10" />
+            </label>
+            <label class="prop-field">高さ (px)
+              <input type="number" id="prop-height" min="10" />
+            </label>
+          </div>
+          <div class="prop-row">
+            <label class="prop-field">実寸 幅 (mm)
+              <input type="text" id="prop-mm-w" placeholder="例: 1200" />
+            </label>
+            <label class="prop-field">実寸 高 (mm)
+              <input type="text" id="prop-mm-h" placeholder="例: 800" />
+            </label>
+          </div>
+          <div class="prop-row">
+            <label class="prop-field">塗り色
+              <input type="color" id="prop-fill" />
+            </label>
+            <label class="prop-field">枠色
+              <input type="color" id="prop-stroke" />
+            </label>
+          </div>
+          <label class="prop-field">回転
+            <input type="range" id="prop-rotation" min="0" max="360" value="0" />
+            <span id="prop-rotation-val" class="prop-val">0°</span>
+          </label>
+        </div>
         <button class="btn btn-ghost btn-block" id="btn-delete">選択を削除</button>
         <div class="help-box">
-          <p><strong>使い方</strong></p>
+          <p><strong>操作</strong></p>
           <ul>
-            <li>パーツをドラッグして機器を配置</li>
-            <li>ペン・線でデッサン</li>
-            <li>「撤去」「残す」で方針をマーク</li>
-            <li>設計は自動保存（ブラウザ内）</li>
+            <li>パーツ選択 → ドラッグで配置・試着</li>
+            <li>ホイールでズーム、配置後は角をドラッグで拡縮</li>
+            <li><strong>右クリック</strong>で微光メモを設置</li>
+            <li>メモにカーソルを合わせると詳細表示</li>
           </ul>
         </div>
       </aside>
     </div>
   </div>
+
+  <!-- 自作パーツ -->
+  <dialog id="part-modal" class="modal">
+    <form id="part-form" method="dialog">
+      <header class="modal-header">
+        <h3>自作パーツを登録</h3>
+        <button type="button" class="btn-close" data-close>×</button>
+      </header>
+      <div class="modal-body">
+        <label class="prop-field">名称 <span class="req">*</span>
+          <input type="text" id="new-part-label" required placeholder="例：ラットプルダウン" />
+        </label>
+        <label class="prop-field">区分
+          <select id="new-part-category">
+            <option>筋トレ</option><option>有酸素</option><option>フリーウェイト</option>
+            <option>設備</option><option>什器</option><option>構造</option><option>その他</option>
+          </select>
+        </label>
+        <div class="prop-row">
+          <label class="prop-field">初期幅 (px)
+            <input type="number" id="new-part-w" value="80" min="20" />
+          </label>
+          <label class="prop-field">初期高 (px)
+            <input type="number" id="new-part-h" value="60" min="20" />
+          </label>
+        </div>
+        <div class="prop-row">
+          <label class="prop-field">実寸 幅 (mm)
+            <input type="text" id="new-part-mm-w" placeholder="任意" />
+          </label>
+          <label class="prop-field">実寸 高 (mm)
+            <input type="text" id="new-part-mm-h" placeholder="任意" />
+          </label>
+        </div>
+        <div class="prop-row">
+          <label class="prop-field">塗り色
+            <input type="color" id="new-part-fill" value="#dbeafe" />
+          </label>
+          <label class="prop-field">枠色
+            <input type="color" id="new-part-stroke" value="#2563eb" />
+          </label>
+        </div>
+        <label class="prop-field">備考
+          <textarea id="new-part-note" rows="2" placeholder="型番・メーカーなど"></textarea>
+        </label>
+        <label class="prop-field">画像（任意）
+          <input type="file" id="new-part-image" accept="image/*" />
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
+        <button type="submit" class="btn btn-primary">登録してパレットに追加</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- メモ -->
+  <dialog id="memo-modal" class="modal">
+    <form id="memo-form" method="dialog">
+      <header class="modal-header">
+        <h3>微光メモ</h3>
+        <button type="button" class="btn-close" data-close>×</button>
+      </header>
+      <div class="modal-body">
+        <input type="hidden" id="memo-target-id" />
+        <label class="prop-field">タイトル
+          <input type="text" id="memo-title" placeholder="例：この区画の制約" />
+        </label>
+        <label class="prop-field">内容
+          <textarea id="memo-content" rows="3" placeholder="施工上の注意、要望など"></textarea>
+        </label>
+        <label class="prop-field">サイズ感
+          <input type="text" id="memo-size" placeholder="例：W1200×D800×H2200" />
+        </label>
+        <label class="prop-field">色・仕様
+          <input type="text" id="memo-colors" placeholder="例：床=#808080 壁=白" />
+        </label>
+        <label class="prop-field">寸法メモ
+          <input type="text" id="memo-dimensions" placeholder="例：柱までの距離 450mm" />
+        </label>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn btn-danger" id="memo-delete" hidden>削除</button>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
+          <button type="submit" class="btn btn-primary">設置</button>
+        </div>
+      </footer>
+    </form>
+  </dialog>
 
   <script type="module" src="js/designer.js"></script>
 </body>
