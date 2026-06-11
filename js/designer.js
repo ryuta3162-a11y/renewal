@@ -34,6 +34,7 @@ let placeStart = null;
 let placePreview = null;
 let memoPendingPos = null;
 let editingMemo = null;
+let drawingImage = null;
 const history = [];
 const historyLimit = 50;
 
@@ -82,7 +83,16 @@ function initCanvas() {
   canvas.on("mouse:move", onCanvasMouseMove);
   canvas.on("mouse:up", onCanvasMouseUp);
 
+  canvas.on("object:added", (e) => {
+    if (drawingImage && e.target && e.target !== drawingImage) {
+      drawingImage.sendToBack();
+    }
+  });
+
   canvasWrap.addEventListener("contextmenu", (e) => e.preventDefault());
+  canvasWrap.addEventListener("mousedown", (e) => {
+    if (e.button === 1) e.preventDefault();
+  });
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
 }
@@ -123,36 +133,95 @@ async function loadDrawing(id) {
     totalPages = pdf.numPages;
     updatePageUI();
     canvas.clear();
-    canvas.setBackgroundImage(
-      pdf.dataUrl,
-      () => {
-        fitBackground();
-        restoreDesign(pageKey());
-        pushHistory(true);
-        setStatus(`${drawing.name} — ページ ${currentPage}`);
-      },
-      { originX: "left", originY: "top" }
-    );
+    drawingImage = null;
+    await loadDrawingImage(pdf.dataUrl);
+    restoreDesign(pageKey());
+    pushHistory(true);
+    setStatus(`${drawing.name} — ページ ${currentPage}`);
   } catch (err) {
     setStatus("図面の読み込みに失敗しました");
     console.error(err);
   }
 }
 
-function fitBackground() {
-  const bg = canvas.backgroundImage;
-  if (!bg) return;
+function loadDrawingImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    fabric.Image.fromURL(
+      dataUrl,
+      (img) => {
+        if (!img) {
+          reject(new Error("image load failed"));
+          return;
+        }
+        img.set({
+          objectType: "drawing",
+          selectable: false,
+          evented: true,
+          hoverCursor: "grab",
+          moveCursor: "grabbing",
+          hasControls: false,
+          hasBorders: false,
+          lockRotation: true,
+          lockScaling: true,
+          lockMovement: true,
+        });
+        drawingImage = img;
+        canvas.add(img);
+        img.sendToBack();
+        fitDrawing(true);
+        resolve(img);
+      },
+      { crossOrigin: "anonymous" }
+    );
+  });
+}
+
+function fitDrawing(resetView = false) {
+  if (!drawingImage) return;
   const pad = 32;
+  const iw = drawingImage.width;
+  const ih = drawingImage.height;
   const scale = Math.min(
-    (canvas.getWidth() - pad * 2) / bg.width,
-    (canvas.getHeight() - pad * 2) / bg.height
+    (canvas.getWidth() - pad * 2) / iw,
+    (canvas.getHeight() - pad * 2) / ih
   );
-  bg.set({
+  drawingImage.set({
     scaleX: scale,
     scaleY: scale,
-    left: (canvas.getWidth() - bg.width * scale) / 2,
-    top: (canvas.getHeight() - bg.height * scale) / 2,
+    left: (canvas.getWidth() - iw * scale) / 2,
+    top: (canvas.getHeight() - ih * scale) / 2,
   });
+  if (resetView) canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+  canvas.requestRenderAll();
+}
+
+function getUserObjects() {
+  return canvas.getObjects().filter((o) => o.objectType !== "drawing");
+}
+
+function snapshotUserObjects() {
+  return JSON.stringify(getUserObjects().map((o) => o.toObject(getSerializeProps())));
+}
+
+function shouldStartPan(opt) {
+  const e = opt.e;
+  if (e.button === 2) return false;
+  if (e.button === 1) return true;
+  if (activeTool === "pan" && e.button === 0) return true;
+  if (spaceDown && e.button === 0) return true;
+  if (activeTool === "select" && e.button === 0) {
+    const t = opt.target;
+    if (!t || t.objectType === "drawing") return true;
+  }
+  return false;
+}
+
+function startPan(e) {
+  isPanning = true;
+  lastPan = { x: e.clientX, y: e.clientY };
+  canvas.selection = false;
+  canvas.setCursor("grabbing");
+  canvas.discardActiveObject();
   canvas.requestRenderAll();
 }
 
@@ -180,16 +249,12 @@ async function reloadPage() {
   const drawing = DRAWINGS.find((d) => d.id === currentDrawingId);
   const pdf = await pdfToDataUrl(drawing.file, currentPage, 2);
   updatePageUI();
-  canvas.getObjects().forEach((o) => canvas.remove(o));
-  canvas.setBackgroundImage(
-    pdf.dataUrl,
-    () => {
-      fitBackground();
-      restoreDesign(pageKey());
-      setStatus(`${drawing.name} — ページ ${currentPage}`);
-    },
-    { originX: "left", originY: "top" }
-  );
+  getUserObjects().forEach((o) => canvas.remove(o));
+  if (drawingImage) canvas.remove(drawingImage);
+  drawingImage = null;
+  await loadDrawingImage(pdf.dataUrl);
+  restoreDesign(pageKey());
+  setStatus(`${drawing.name} — ページ ${currentPage}`);
 }
 
 function pageKey() {
@@ -285,15 +350,13 @@ function onCanvasMouseDown(opt) {
     return;
   }
 
-  if (activeTool === "pan" || spaceDown) {
-    isPanning = true;
-    lastPan = { x: e.clientX, y: e.clientY };
-    canvas.selection = false;
-    canvas.defaultCursor = "grabbing";
+  if (shouldStartPan(opt)) {
+    if (e.button === 1) e.preventDefault();
+    startPan(e);
     return;
   }
 
-  if (activeTool === "place" && pendingPart && !opt.target) {
+  if (activeTool === "place" && pendingPart && (!opt.target || opt.target?.objectType === "drawing")) {
     placeStart = canvas.getPointer(e);
     placePreview = new fabric.Rect({
       left: placeStart.x,
@@ -341,7 +404,7 @@ async function onCanvasMouseUp(opt) {
     isPanning = false;
     lastPan = null;
     canvas.selection = activeTool === "select";
-    canvas.defaultCursor = activeTool === "pan" ? "grab" : "default";
+    updateCanvasCursor();
     return;
   }
 
@@ -530,16 +593,16 @@ function setupToolbar() {
   });
   document.getElementById("btn-export").addEventListener("click", exportPng);
   document.getElementById("btn-clear-objects").addEventListener("click", () => {
-    if (!confirm("配置・描画・メモをすべて消しますか？")) return;
-    canvas.getObjects().forEach((o) => canvas.remove(o));
+    if (!confirm("配置・描画・メモをすべて消しますか？（図面は残ります）")) return;
+    getUserObjects().forEach((o) => canvas.remove(o));
     pushHistory();
   });
   document.getElementById("btn-delete").addEventListener("click", deleteSelected);
   document.getElementById("btn-zoom-in").addEventListener("click", () => zoomCanvas(1.2));
   document.getElementById("btn-zoom-out").addEventListener("click", () => zoomCanvas(0.83));
   document.getElementById("btn-zoom-fit").addEventListener("click", () => {
-    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-    fitBackground();
+    fitDrawing(true);
+    flashStatus("全体表示に戻しました");
   });
 }
 
@@ -561,16 +624,35 @@ function setTool(tool) {
 
   if (tool === "line" || tool === "rect") {
     canvas.selection = false;
-    canvas.defaultCursor = "crosshair";
     enableShapeDraw(tool);
   } else if (tool === "place") {
     canvas.selection = false;
-    canvas.defaultCursor = "crosshair";
   } else if (tool === "pan") {
-    canvas.defaultCursor = "grab";
+    canvas.skipTargetFind = true;
   } else {
-    canvas.defaultCursor = "default";
+    canvas.skipTargetFind = false;
   }
+  updateCanvasCursor();
+}
+
+function updateCanvasCursor() {
+  if (isPanning || spaceDown) {
+    canvas.setCursor("grabbing");
+    return;
+  }
+  if (activeTool === "pan") {
+    canvas.setCursor("grab");
+    return;
+  }
+  if (activeTool === "place") {
+    canvas.setCursor("crosshair");
+    return;
+  }
+  if (activeTool === "line" || activeTool === "rect") {
+    canvas.setCursor("crosshair");
+    return;
+  }
+  canvas.setCursor("default");
 }
 
 let shapeHandler = null;
@@ -756,7 +838,7 @@ function updateProps() {
 // ── History & persist ─────────────────────────────
 function pushHistory(reset = false) {
   if (reset) history.length = 0;
-  const snap = JSON.stringify(canvas.toJSON(getSerializeProps()));
+  const snap = snapshotUserObjects();
   if (history.length && history[history.length - 1] === snap) return;
   history.push(snap);
   if (history.length > historyLimit) history.shift();
@@ -765,9 +847,11 @@ function pushHistory(reset = false) {
 function undo() {
   if (history.length < 2) return;
   history.pop();
-  const bg = canvas.backgroundImage;
-  canvas.loadFromJSON(history[history.length - 1], () => {
-    if (bg) canvas.setBackgroundImage(bg, canvas.requestRenderAll.bind(canvas));
+  getUserObjects().forEach((o) => canvas.remove(o));
+  const objs = JSON.parse(history[history.length - 1]);
+  fabric.util.enlivenObjects(objs, (restored) => {
+    restored.forEach((o) => canvas.add(o));
+    if (drawingImage) drawingImage.sendToBack();
     canvas.requestRenderAll();
     updateProps();
   });
@@ -776,7 +860,7 @@ function undo() {
 function persistCurrent() {
   if (!currentDrawingId) return;
   saveDesign(pageKey(), {
-    objects: canvas.getObjects().map((o) => o.toObject(getSerializeProps())),
+    objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
   });
 }
 
@@ -785,6 +869,7 @@ function restoreDesign(key) {
   if (!data?.objects?.length) return;
   fabric.util.enlivenObjects(data.objects, (objs) => {
     objs.forEach((o) => canvas.add(o));
+    if (drawingImage) drawingImage.sendToBack();
     canvas.requestRenderAll();
   });
 }
@@ -803,17 +888,22 @@ function exportPng() {
 function setupKeyboard() {
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select")) return;
-    if (e.code === "Space") { spaceDown = true; e.preventDefault(); }
+    if (e.code === "Space") {
+      spaceDown = true;
+      e.preventDefault();
+      updateCanvasCursor();
+    }
     if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelected(); }
     if (e.key === "z" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
     if (e.key === "v" || e.key === "V") setTool("select");
+    if (e.key === "h" || e.key === "H") setTool("pan");
     if (e.key === "p" || e.key === "P") setTool("pen");
   });
   document.addEventListener("keyup", (e) => {
     if (e.code === "Space") {
       spaceDown = false;
       isPanning = false;
-      if (activeTool !== "pan") canvas.defaultCursor = "default";
+      updateCanvasCursor();
     }
   });
 }
