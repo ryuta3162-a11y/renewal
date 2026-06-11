@@ -13,6 +13,9 @@ import {
   placePart,
   createMemoPin,
   updatePartColors,
+  updatePartLabel,
+  normalizePartAfterResize,
+  upgradePartGroup,
   getSerializeProps,
   createPartBox,
 } from "./objects.js";
@@ -35,6 +38,8 @@ let placePreview = null;
 let memoPendingPos = null;
 let editingMemo = null;
 let drawingImage = null;
+let autoSaveTimer = null;
+let lastSavedAt = null;
 const history = [];
 const historyLimit = 50;
 
@@ -60,7 +65,25 @@ function initCanvas() {
     stopContextMenu: true,
   });
 
-  canvas.on("object:modified", () => { pushHistory(); updateProps(); });
+  canvas.on("object:modified", (e) => {
+    if (e.target?.objectType === "part") normalizePartAfterResize(e.target);
+    pushHistory();
+    updateProps();
+    scheduleAutoSave();
+  });
+  canvas.on("object:added", (e) => {
+    if (drawingImage && e.target && e.target !== drawingImage) {
+      drawingImage.sendToBack();
+    }
+    if (!e.target?._skipHistory) {
+      pushHistory();
+      scheduleAutoSave();
+    }
+  });
+  canvas.on("object:removed", () => {
+    pushHistory();
+    scheduleAutoSave();
+  });
   canvas.on("object:scaling", updatePropsLive);
   canvas.on("object:moving", updatePropsLive);
   canvas.on("object:rotating", updatePropsLive);
@@ -75,6 +98,7 @@ function initCanvas() {
     let z = canvas.getZoom() * 0.999 ** e.deltaY;
     z = Math.min(Math.max(z, 0.15), 10);
     canvas.zoomToPoint({ x: e.offsetX, y: e.offsetY }, z);
+    scheduleAutoSave();
     e.preventDefault();
     e.stopPropagation();
   });
@@ -83,18 +107,13 @@ function initCanvas() {
   canvas.on("mouse:move", onCanvasMouseMove);
   canvas.on("mouse:up", onCanvasMouseUp);
 
-  canvas.on("object:added", (e) => {
-    if (drawingImage && e.target && e.target !== drawingImage) {
-      drawingImage.sendToBack();
-    }
-  });
-
   canvasWrap.addEventListener("contextmenu", (e) => e.preventDefault());
   canvasWrap.addEventListener("mousedown", (e) => {
     if (e.button === 1) e.preventDefault();
   });
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
+  window.addEventListener("beforeunload", () => persistCurrent());
 }
 
 function resizeCanvas() {
@@ -384,6 +403,7 @@ function onCanvasMouseMove(opt) {
     vpt[5] += e.clientY - lastPan.y;
     lastPan = { x: e.clientX, y: e.clientY };
     canvas.requestRenderAll();
+    scheduleAutoSave();
     return;
   }
 
@@ -740,15 +760,14 @@ function applyPropToSelection(field) {
   if (!obj || obj.objectType !== "part") return;
 
   if (field === "label") {
-    obj.set("partLabel", document.getElementById("prop-label").value);
-    const text = obj._objects?.find((o) => o.type === "text");
-    if (text) text.set("text", document.getElementById("prop-label").value);
-    obj.dirty = true;
+    updatePartLabel(obj, document.getElementById("prop-label").value);
+    scheduleAutoSave();
   }
   if (field === "width" || field === "height") {
     const tw = Number(document.getElementById("prop-width").value);
     const th = Number(document.getElementById("prop-height").value);
     if (tw > 0 && th > 0) resizePart(obj, tw, th);
+    scheduleAutoSave();
   }
   if (field === "mmW") obj.set("realWidthMm", document.getElementById("prop-mm-w").value);
   if (field === "mmH") obj.set("realHeightMm", document.getElementById("prop-mm-h").value);
@@ -768,6 +787,7 @@ function resizePart(obj, tw, th) {
   const ch = obj.getScaledHeight();
   if (!cw || !ch) return;
   obj.set({ scaleX: (obj.scaleX * tw) / cw, scaleY: (obj.scaleY * th) / ch });
+  normalizePartAfterResize(obj);
 }
 
 function updatePropsLive() {
@@ -857,20 +877,50 @@ function undo() {
   });
 }
 
+function scheduleAutoSave() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    persistCurrent();
+    showAutoSaved();
+  }, 600);
+}
+
+function showAutoSaved() {
+  lastSavedAt = new Date();
+  const time = lastSavedAt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+  const base = statusEl.dataset.base || statusEl.textContent;
+  statusEl.dataset.base = base;
+  statusEl.textContent = `自動保存しました（${time}）`;
+  setTimeout(() => {
+    if (lastSavedAt && Date.now() - lastSavedAt.getTime() < 2500) {
+      statusEl.textContent = statusEl.dataset.base || base;
+    }
+  }, 2000);
+}
+
 function persistCurrent() {
   if (!currentDrawingId) return;
   saveDesign(pageKey(), {
     objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
+    viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
   });
 }
 
 function restoreDesign(key) {
   const data = loadDesign(key);
-  if (!data?.objects?.length) return;
+  if (!data) return;
+  if (data.viewport?.length === 6) {
+    canvas.setViewportTransform(data.viewport);
+  }
+  if (!data.objects?.length) return;
   fabric.util.enlivenObjects(data.objects, (objs) => {
-    objs.forEach((o) => canvas.add(o));
+    objs.forEach((o) => {
+      upgradePartGroup(o);
+      canvas.add(o);
+    });
     if (drawingImage) drawingImage.sendToBack();
     canvas.requestRenderAll();
+    scheduleAutoSave();
   });
 }
 
@@ -925,6 +975,7 @@ function esc(s) {
 
 function setStatus(msg) {
   statusEl.textContent = msg;
+  statusEl.dataset.base = msg;
 }
 
 function flashStatus(msg) {
