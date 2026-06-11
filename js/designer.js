@@ -1,4 +1,5 @@
 import { DRAWINGS, DEFAULT_PARTS } from "./constants.js";
+import { getInventoryParts, getCategoryOrder } from "./machine-inventory.js";
 import { pdfToDataUrl } from "./pdf-loader.js";
 import { saveDesign, loadDesign } from "./storage.js";
 import {
@@ -197,14 +198,18 @@ function pageKey() {
 
 // ── Palette ─────────────────────────────────────────
 function getAllParts() {
-  return [...DEFAULT_PARTS, ...loadCustomParts()];
+  return [...getInventoryParts(), ...DEFAULT_PARTS, ...loadCustomParts()];
 }
 
 function rebuildPalette() {
   const container = document.getElementById("palette");
   container.innerHTML = "";
   const parts = getAllParts();
-  const cats = [...new Set(parts.map((p) => p.category))];
+  const order = getCategoryOrder();
+  const cats = [
+    ...order.filter((c) => parts.some((p) => p.category === c)),
+    ...[...new Set(parts.map((p) => p.category))].filter((c) => !order.includes(c)),
+  ];
 
   cats.forEach((cat) => {
     const section = document.createElement("div");
@@ -218,10 +223,12 @@ function rebuildPalette() {
         const btn = document.createElement("button");
         btn.className = "palette-item";
         btn.dataset.partId = def.id;
-        btn.title = "クリックで選択 → 図面上をドラッグして配置";
+        const countBadge = def.count ? `<span class="palette-count">${def.count}台</span>` : "";
+        btn.title = def.note || `クリックで選択 → 図面上をドラッグして配置`;
         btn.innerHTML = `
           <span class="palette-swatch" style="background:${def.fill};border-color:${def.stroke}"></span>
           <span class="palette-label">${esc(def.label)}</span>
+          ${countBadge}
         `;
         btn.addEventListener("click", () => selectPart(def));
         if (def.isCustom) {
@@ -717,9 +724,13 @@ function updateProps() {
   }
 
   if (obj.objectType === "part") {
+    const countLine = obj.inventoryCount
+      ? `<p class="prop-meta">現状在庫: ${obj.inventoryCount}台</p>`
+      : "";
     content.innerHTML = `
       <p class="prop-type">${esc(obj.partLabel || "パーツ")}</p>
       <p class="prop-meta">${esc(obj.partCategory || "")}</p>
+      ${countLine}
     `;
     form.hidden = false;
     document.getElementById("prop-label").value = obj.partLabel || "";

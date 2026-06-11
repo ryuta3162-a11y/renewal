@@ -6,6 +6,7 @@ const SERIALIZE_PROPS = [
   "partCategory",
   "realWidthMm",
   "realHeightMm",
+  "inventoryCount",
 ];
 
 export function getSerializeProps() {
@@ -67,6 +68,7 @@ export function createPartBox(def, x, y, w, h) {
     partCategory: def.category,
     realWidthMm: def.realWidthMm || "",
     realHeightMm: def.realHeightMm || "",
+    inventoryCount: def.count || null,
     objectType: "part",
     lockScalingFlip: true,
   });
@@ -96,6 +98,7 @@ export function createPartFromImage(def, x, y, w, h) {
         partCategory: def.category,
         realWidthMm: def.realWidthMm || "",
         realHeightMm: def.realHeightMm || "",
+        inventoryCount: def.count || null,
         objectType: "part",
         lockScalingFlip: true,
       });

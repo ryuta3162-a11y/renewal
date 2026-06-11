@@ -78,7 +78,7 @@ body {
 /* Workspace */
 .workspace {
   display: grid;
-  grid-template-columns: 230px 1fr 240px;
+  grid-template-columns: 250px 1fr 240px;
   flex: 1;
   min-height: 0;
 }
@@ -119,6 +119,14 @@ body {
 }
 .palette-swatch { width: 26px; height: 20px; border-radius: 3px; border: 2px solid; }
 .palette-label { text-align: center; line-height: 1.2; word-break: break-all; }
+.palette-count {
+  font-size: 0.58rem;
+  color: var(--muted);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  margin-top: 0.1rem;
+}
 .palette-del {
   position: absolute; top: 2px; right: 4px;
   font-size: 0.7rem; color: var(--muted); cursor: pointer; line-height: 1;
