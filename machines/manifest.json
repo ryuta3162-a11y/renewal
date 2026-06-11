@@ -1,32 +1,94 @@
 {
-  "comment": "LPのマシンラインナップ画像を machines/ に同名で置くと自動表示されます",
+  "comment": "LPマシンラインナップ画像 — 画像内テキストに基づく紐づけ",
   "lpBaseUrl": "",
   "machines": {
-    "ランニングマシン": { "file": "treadmill.webp", "aliases": ["ランニング", "TM"] },
-    "アセントトレーナー": { "file": "ascent-trainer.webp" },
-    "バイクマシン": { "file": "bike.webp", "aliases": ["エアロバイク", "バイク"] },
-    "レッグプレス": { "file": "leg-press.webp" },
-    "レッグエクステンション": { "file": "leg-extension.webp" },
-    "レッグカール": { "file": "leg-curl.webp" },
-    "ラットプルダウン": { "file": "lat-pulldown.webp" },
-    "シーテッドロー": { "file": "seated-row.webp" },
-    "チェストプレス": { "file": "chest-press.webp" },
-    "リアデルト・ペックフライ": { "file": "rear-delt-pec-fly.webp" },
-    "ロータリートルソー": { "file": "rotary-torso.webp" },
-    "アブドミナルクランチ": { "file": "abdominal-crunch.webp" },
-    "グルートキックバック": { "file": "glute-kickback.webp" },
-    "ショルダーマシン": { "file": "shoulder-machine.webp" },
-    "ヒップアブダクション": { "file": "hip-abduction.webp" },
-    "ヒップアダクション": { "file": "hip-adduction.webp" },
-    "パワーラック": { "file": "power-rack.webp" },
-    "スミスマシン": { "file": "smith-machine.webp" },
-    "ケーブルマシン": { "file": "cable-machine.webp" },
-    "プリチャーカール台": { "file": "preacher-curl.webp" },
-    "アジャスタブルベンチ": { "file": "adjustable-bench.webp" },
-    "マルチジャングル": { "file": "multi-jungle.webp" },
-    "インクラインチェストプレス": { "file": "incline-chest-press.webp" },
-    "45°レッグプレス": { "file": "leg-press-45.webp", "aliases": ["45℃レッグプレス"] },
-    "チンニング・ディップス": { "file": "chin-dip.webp", "aliases": ["チンニング・ディップススタンド"] },
-    "ベンチプレス台": { "file": "bench-press.webp" }
+    "ランニングマシン": {
+      "file": "cardio_1.jpg",
+      "imageHasLabel": true,
+      "aliases": ["トレッドミル", "ランニング"]
+    },
+    "アセントトレーナー": {
+      "file": "cardio_2.jpg",
+      "imageHasLabel": true,
+      "aliases": ["クロストレーナー"]
+    },
+    "バイクマシン": {
+      "file": "cardio_3.jpg",
+      "imageHasLabel": true,
+      "aliases": ["エアロバイク", "リクラインバイク"]
+    },
+    "レッグプレス": { "file": "resistance_1.jpg", "imageHasLabel": true },
+    "ショルダーマシン": {
+      "file": "resistance_2.jpg",
+      "imageHasLabel": true,
+      "aliases": ["ショルダープレス"]
+    },
+    "リアデルト・ペックフライ": {
+      "file": "resistance_3.jpg",
+      "imageHasLabel": true,
+      "aliases": ["ペックフライ/リアデルト", "ペックフライ", "リアデルト"]
+    },
+    "ラットプルダウン": { "file": "resistance_4.jpg", "imageHasLabel": true },
+    "グルートキックバック": {
+      "file": "resistance_5.jpg",
+      "imageHasLabel": true,
+      "aliases": ["グルート"]
+    },
+    "レッグエクステンション": { "file": "resistance_8.jpg", "imageHasLabel": true },
+    "レッグカール": { "file": "resistance_9.jpg", "imageHasLabel": true },
+    "ヒップアブダクション": {
+      "file": "resistance_10.jpg",
+      "imageHasLabel": true,
+      "aliases": ["ピップアブダクション", "ヒップアブダクション"]
+    },
+    "ヒップアダクション": { "file": "resistance_11.jpg", "imageHasLabel": true },
+    "ロータリートルソー": { "file": "resistance_12.jpg", "imageHasLabel": true },
+    "チェストプレス": { "file": "resistance_13.jpg", "imageHasLabel": true },
+    "シーテッドロー": {
+      "file": "resistance_14.jpg",
+      "imageHasLabel": true,
+      "aliases": ["ローロー", "シートロー"]
+    },
+    "アブドミナルクランチ": {
+      "file": "resistance_15.jpg",
+      "imageHasLabel": true,
+      "aliases": ["アブドミナル"]
+    },
+    "パワーラック": { "file": "freeweight_1.jpg", "imageHasLabel": true },
+    "インクラインチェストプレス": { "file": "freeweight_2.jpg", "imageHasLabel": true },
+    "プリチャーカール台": {
+      "file": "freeweight_3.jpg",
+      "imageHasLabel": true,
+      "aliases": ["プリチャーカール"]
+    },
+    "チンニング・ディップス": {
+      "file": "freeweight_4.jpg",
+      "imageHasLabel": true,
+      "aliases": ["チンニング・ディップススタンド", "チンニング＆ディップス"]
+    },
+    "ベンチプレス台": { "file": "freeweight_5.jpg", "imageHasLabel": true },
+    "スミスマシン": { "file": "freeweight_6.jpg", "imageHasLabel": true },
+    "ケーブルマシン": {
+      "file": "freeweight_7.jpg",
+      "imageHasLabel": true,
+      "aliases": ["CYBEX ケーブルマシン"]
+    },
+    "マルチジャングル": {
+      "file": "freeweight_9.jpg",
+      "imageHasLabel": true,
+      "aliases": ["ケーブルステーション", "マルチジャングル(ラットプル、シーテッドロー、ケーブル)"]
+    },
+    "アジャスタブルベンチ": { "file": "freeweight_11.jpg", "imageHasLabel": true },
+    "45°レッグプレス": {
+      "file": "freeweight_12.jpg",
+      "imageHasLabel": true,
+      "aliases": ["45℃レッグプレス", "45°Cレッグプレス"]
+    }
+  },
+  "extras": {
+    "resistance_6.jpg": "シットアップベンチ",
+    "resistance_7.jpg": "バックエクステンション",
+    "freeweight_8.jpg": "テクノジムケーブルマシン（予備）",
+    "freeweight_10.jpg": "ダンベル1KG～40KG"
   }
 }

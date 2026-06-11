@@ -1,5 +1,6 @@
 let manifest = null;
 const imageCache = new Map();
+const EXTENSIONS = ["webp", "png", "jpg", "jpeg"];
 
 export async function loadMachineManifest() {
   if (manifest) return manifest;
@@ -22,20 +23,57 @@ function findEntry(label) {
   return null;
 }
 
+function fileBase(entry) {
+  if (!entry?.file) return null;
+  return entry.file.replace(/\.[^.]+$/, "");
+}
+
+export function getManifestHint(label) {
+  const entry = findEntry(label);
+  if (!entry?.file) return null;
+  const base = fileBase(entry);
+  return `machines/${base}.webp（.png .jpg も可）`;
+}
+
 export function resolveImageUrl(label, customUrl) {
   if (customUrl) return customUrl;
   const entry = findEntry(label);
-  if (!entry) return null;
-  if (entry.file) return `/machines/${entry.file}`;
-  if (manifest.lpBaseUrl && entry.lpFile) {
-    return `${manifest.lpBaseUrl.replace(/\/$/, "")}/${entry.lpFile}`;
+  if (!entry?.file) return null;
+  return `/machines/${entry.file}`;
+}
+
+export async function resolveImageUrlAsync(label, customUrl) {
+  if (customUrl) {
+    const ok = await checkImageExists(customUrl);
+    return ok ? customUrl : null;
   }
+  const entry = findEntry(label);
+  if (!entry) return null;
+
+  const base = fileBase(entry);
+  if (base) {
+    for (const ext of EXTENSIONS) {
+      const url = `/machines/${base}.${ext}`;
+      if (await checkImageExists(url)) return url;
+    }
+  }
+
+  if (manifest.lpBaseUrl && entry.lpFile) {
+    const url = `${manifest.lpBaseUrl.replace(/\/$/, "")}/${entry.lpFile}`;
+    if (await checkImageExists(url)) return url;
+  }
+
   return null;
 }
 
 export function attachImageToPart(part) {
-  const url = resolveImageUrl(part.label, part.imageUrl);
-  return url ? { ...part, imageUrl: url } : part;
+  const entry = findEntry(part.label);
+  if (!entry?.file) return part;
+  return {
+    ...part,
+    imageUrl: `/machines/${entry.file}`,
+    imageHasLabel: !!entry.imageHasLabel,
+  };
 }
 
 export function checkImageExists(url) {
@@ -56,14 +94,15 @@ export function checkImageExists(url) {
 }
 
 export async function enrichPartWithImage(part) {
-  const url = resolveImageUrl(part.label, part.imageUrl);
-  if (!url) return { ...part, hasImage: false };
-  const exists = await checkImageExists(url);
-  return exists ? { ...part, imageUrl: url, hasImage: true } : { ...part, hasImage: false };
-}
-
-export function getManifestHint(label) {
-  const entry = findEntry(label);
-  if (!entry?.file) return null;
-  return `machines/${entry.file}`;
+  const entry = findEntry(part.label);
+  const url = await resolveImageUrlAsync(part.label, part.imageUrl);
+  if (!url) {
+    return { ...part, hasImage: false, imageUrl: resolveImageUrl(part.label) };
+  }
+  return {
+    ...part,
+    imageUrl: url,
+    hasImage: true,
+    imageHasLabel: !!entry?.imageHasLabel,
+  };
 }

@@ -377,7 +377,7 @@ async function showMachinePreview(def) {
 
   panel.hidden = false;
   const enriched = await enrichPartWithImage(attachImageToPart(def));
-  useImageCb.checked = enriched.hasImage && (def.useImage !== false && getUseImagePref());
+  useImageCb.checked = enriched.hasImage && def.useImage !== false;
 
   if (enriched.hasImage) {
     imgEl.src = enriched.imageUrl;
@@ -389,10 +389,10 @@ async function showMachinePreview(def) {
     placeholder.hidden = false;
     const fileHint = getManifestHint(def.label);
     placeholder.textContent = fileHint
-      ? `画像未登録\nLPからコピー → machines/${fileHint.split("/").pop()}`
+      ? `画像未登録\nLPの画像を renewal/machines/ にコピーしてください\n（${fileHint}）`
       : "画像未登録（枠のみで配置されます）";
     hint.textContent = fileHint
-      ? `machines/ フォルダに置くと名称「${def.label}」で自動表示`
+      ? `GitHubにpushすれば「${def.label}」に自動表示されます`
       : "";
   }
 }

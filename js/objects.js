@@ -9,6 +9,7 @@ const SERIALIZE_PROPS = [
   "inventoryCount",
   "partImageMode",
   "imageUrl",
+  "imageHasLabel",
 ];
 
 const LABEL_PAD = 5;
@@ -126,21 +127,35 @@ function scaleImageToFit(img, areaW, areaH) {
 
 function buildImagePartObjects(def, width, height, img) {
   const label = def.label || "パーツ";
+  const hasCaptionInImage = !!def.imageHasLabel;
   const objects = [];
 
   objects.push(
     new fabric.Rect({
       width,
       height,
-      fill: def.fill || "rgba(255,255,255,0.95)",
+      fill: hasCaptionInImage ? "rgba(255,255,255,0.98)" : def.fill || "rgba(255,255,255,0.95)",
       stroke: def.stroke || "#2563eb",
-      strokeWidth: 2,
+      strokeWidth: hasCaptionInImage ? 1 : 2,
       rx: 4,
       ry: 4,
       originX: "center",
       originY: "center",
     })
   );
+
+  if (hasCaptionInImage) {
+    const scale = Math.min((width - 4) / img.width, (height - 4) / img.height);
+    img.set({
+      scaleX: scale,
+      scaleY: scale,
+      originX: "center",
+      originY: "center",
+      top: 0,
+    });
+    objects.push(img);
+    return objects;
+  }
 
   scaleImageToFit(img, width - 8, height - CAPTION_H - 8);
   objects.push(img);
@@ -161,19 +176,20 @@ function buildImagePartObjects(def, width, height, img) {
     })
   );
 
-  const capText = new fabric.Textbox(label, {
-    width: capW - 6,
-    fontSize: Math.max(7, Math.min(9, capW / (label.length * 0.55))),
-    fill: "#1e293b",
-    fontWeight: "600",
-    textAlign: "center",
-    originX: "center",
-    originY: "center",
-    splitByGrapheme: true,
-    lineHeight: 1.1,
-    top: height / 2 - CAPTION_H / 2 - 1,
-  });
-  objects.push(capText);
+  objects.push(
+    new fabric.Textbox(label, {
+      width: capW - 6,
+      fontSize: Math.max(7, Math.min(9, capW / (label.length * 0.55))),
+      fill: "#1e293b",
+      fontWeight: "600",
+      textAlign: "center",
+      originX: "center",
+      originY: "center",
+      splitByGrapheme: true,
+      lineHeight: 1.1,
+      top: height / 2 - CAPTION_H / 2 - 1,
+    })
+  );
 
   return objects;
 }
@@ -199,6 +215,7 @@ export function createPartWithMachineImage(def, x, y, w, h) {
         const group = new fabric.Group(objects, {
           ...basePartProps(def, x, y),
           partImageMode: true,
+          imageHasLabel: !!def.imageHasLabel,
         });
         group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
         resolve(group);
@@ -222,6 +239,7 @@ export function normalizePartAfterResize(group) {
       fill: group._objects?.[0]?.fill,
       stroke: group._objects?.[0]?.stroke,
       imageUrl: group.imageUrl,
+      imageHasLabel: group.imageHasLabel,
     };
     fabric.Image.fromURL(group.imageUrl, (img) => {
       const objects = buildImagePartObjects(def, w, h, img);
