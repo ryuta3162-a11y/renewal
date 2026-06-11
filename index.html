@@ -103,6 +103,18 @@
             <span id="prop-rotation-val" class="prop-val">0°</span>
           </label>
         </div>
+        <div id="machine-preview-panel" class="machine-preview-panel" hidden>
+          <p class="panel-title">マシンプレビュー</p>
+          <div class="machine-preview-frame">
+            <img id="machine-preview-img" class="machine-preview-img" alt="" hidden />
+            <p id="machine-preview-placeholder" class="machine-preview-placeholder"></p>
+          </div>
+          <label class="prop-field preview-toggle">
+            <input type="checkbox" id="prop-use-image" checked />
+            画像付きで配置（名称で自動紐づけ）
+          </label>
+          <p id="machine-preview-hint" class="machine-preview-hint"></p>
+        </div>
         <button class="btn btn-ghost btn-block" id="btn-delete">選択を削除</button>
         <div class="help-box">
           <p><strong>操作</strong></p>

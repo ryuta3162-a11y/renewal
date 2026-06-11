@@ -1,5 +1,11 @@
 import { DRAWINGS, DEFAULT_PARTS } from "./constants.js";
 import { getInventoryParts, getCategoryOrder } from "./machine-inventory.js";
+import {
+  loadMachineManifest,
+  attachImageToPart,
+  enrichPartWithImage,
+  getManifestHint,
+} from "./machine-images.js";
 import { pdfToDataUrl } from "./pdf-loader.js";
 import { saveDesign, loadDesign } from "./storage.js";
 import {
@@ -47,12 +53,13 @@ init();
 async function init() {
   applyProControls();
   initCanvas();
+  await loadMachineManifest();
   buildDrawingSelect();
   setupToolbar();
   setupModals();
   setupPropsForm();
   setupKeyboard();
-  rebuildPalette();
+  await rebuildPalette();
   await loadDrawing(DRAWINGS[0].id);
 }
 
@@ -282,10 +289,14 @@ function pageKey() {
 
 // ── Palette ─────────────────────────────────────────
 function getAllParts() {
-  return [...getInventoryParts(), ...DEFAULT_PARTS, ...loadCustomParts()];
+  return [...getInventoryParts(), ...DEFAULT_PARTS, ...loadCustomParts()].map(attachImageToPart);
 }
 
-function rebuildPalette() {
+function getUseImagePref() {
+  return localStorage.getItem("renewal-use-image") !== "false";
+}
+
+async function rebuildPalette() {
   const container = document.getElementById("palette");
   container.innerHTML = "";
   const parts = getAllParts();
@@ -295,26 +306,28 @@ function rebuildPalette() {
     ...[...new Set(parts.map((p) => p.category))].filter((c) => !order.includes(c)),
   ];
 
-  cats.forEach((cat) => {
+  for (const cat of cats) {
     const section = document.createElement("div");
     section.className = "palette-section";
     section.innerHTML = `<h4>${cat}</h4><div class="palette-grid"></div>`;
     const grid = section.querySelector(".palette-grid");
 
-    parts
-      .filter((p) => p.category === cat)
-      .forEach((def) => {
+    for (const def of parts.filter((p) => p.category === cat)) {
+        const enriched = await enrichPartWithImage(attachImageToPart(def));
         const btn = document.createElement("button");
         btn.className = "palette-item";
         btn.dataset.partId = def.id;
         const countBadge = def.count ? `<span class="palette-count">${def.count}台</span>` : "";
         btn.title = def.note || `クリックで選択 → 図面上をドラッグして配置`;
+        const thumb = enriched.hasImage
+          ? `<img class="palette-thumb" src="${enriched.imageUrl}" alt="" />`
+          : `<span class="palette-swatch" style="background:${def.fill};border-color:${def.stroke}"></span>`;
         btn.innerHTML = `
-          <span class="palette-swatch" style="background:${def.fill};border-color:${def.stroke}"></span>
+          ${thumb}
           <span class="palette-label">${esc(def.label)}</span>
           ${countBadge}
         `;
-        btn.addEventListener("click", () => selectPart(def));
+        btn.addEventListener("click", () => selectPart(enriched));
         if (def.isCustom) {
           const del = document.createElement("span");
           del.className = "palette-del";
@@ -331,18 +344,57 @@ function rebuildPalette() {
           btn.appendChild(del);
         }
         grid.appendChild(btn);
-      });
+    }
     container.appendChild(section);
-  });
+  }
 
   highlightSelectedPart();
 }
 
-function selectPart(def) {
-  pendingPart = def;
+async function selectPart(def) {
+  const enriched = await enrichPartWithImage({
+    ...attachImageToPart(def),
+    useImage: getUseImagePref(),
+  });
+  pendingPart = enriched;
   setTool("place");
   flashStatus(`「${def.label}」— 図面上をドラッグしてサイズを決めて配置`);
   highlightSelectedPart();
+  await showMachinePreview(enriched);
+}
+
+async function showMachinePreview(def) {
+  const panel = document.getElementById("machine-preview-panel");
+  const imgEl = document.getElementById("machine-preview-img");
+  const placeholder = document.getElementById("machine-preview-placeholder");
+  const hint = document.getElementById("machine-preview-hint");
+  const useImageCb = document.getElementById("prop-use-image");
+
+  if (!def || def.mark) {
+    panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  const enriched = await enrichPartWithImage(attachImageToPart(def));
+  useImageCb.checked = enriched.hasImage && (def.useImage !== false && getUseImagePref());
+
+  if (enriched.hasImage) {
+    imgEl.src = enriched.imageUrl;
+    imgEl.hidden = false;
+    placeholder.hidden = true;
+    hint.textContent = "LPマシンラインナップ画像を自動表示中";
+  } else {
+    imgEl.hidden = true;
+    placeholder.hidden = false;
+    const fileHint = getManifestHint(def.label);
+    placeholder.textContent = fileHint
+      ? `画像未登録\nLPからコピー → machines/${fileHint.split("/").pop()}`
+      : "画像未登録（枠のみで配置されます）";
+    hint.textContent = fileHint
+      ? `machines/ フォルダに置くと名称「${def.label}」で自動表示`
+      : "";
+  }
 }
 
 function highlightSelectedPart() {
@@ -745,6 +797,12 @@ function zoomCanvas(factor) {
 function setupPropsForm() {
   const bind = (id, fn) => document.getElementById(id)?.addEventListener("input", fn);
 
+  document.getElementById("prop-use-image")?.addEventListener("change", (e) => {
+    const on = e.target.checked;
+    localStorage.setItem("renewal-use-image", on);
+    if (pendingPart) pendingPart.useImage = on;
+  });
+
   bind("prop-label", () => applyPropToSelection("label"));
   bind("prop-width", () => applyPropToSelection("width"));
   bind("prop-height", () => applyPropToSelection("height"));
@@ -807,11 +865,14 @@ function updateProps() {
   if (!obj) {
     content.innerHTML = `<p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>`;
     form.hidden = true;
+    if (pendingPart) showMachinePreview(pendingPart);
+    else document.getElementById("machine-preview-panel").hidden = true;
     return;
   }
 
   if (obj.objectType === "memo") {
     form.hidden = true;
+    document.getElementById("machine-preview-panel").hidden = true;
     const d = obj.memoData || {};
     content.innerHTML = `
       <p class="prop-type">微光メモ</p>
@@ -845,6 +906,14 @@ function updateProps() {
     document.getElementById("prop-stroke").value = rgbToHex(rect?.stroke) || "#2563eb";
     document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
     document.getElementById("prop-rotation-val").textContent = `${Math.round(obj.angle || 0)}°`;
+    document.getElementById("prop-use-image").checked = !!obj.partImageMode;
+    showMachinePreview({
+      label: obj.partLabel,
+      category: obj.partCategory,
+      imageUrl: obj.imageUrl,
+      useImage: obj.partImageMode,
+      id: obj.partId,
+    });
     return;
   }
 

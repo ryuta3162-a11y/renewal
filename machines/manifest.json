@@ -1,0 +1,32 @@
+{
+  "comment": "LPのマシンラインナップ画像を machines/ に同名で置くと自動表示されます",
+  "lpBaseUrl": "",
+  "machines": {
+    "ランニングマシン": { "file": "treadmill.webp", "aliases": ["ランニング", "TM"] },
+    "アセントトレーナー": { "file": "ascent-trainer.webp" },
+    "バイクマシン": { "file": "bike.webp", "aliases": ["エアロバイク", "バイク"] },
+    "レッグプレス": { "file": "leg-press.webp" },
+    "レッグエクステンション": { "file": "leg-extension.webp" },
+    "レッグカール": { "file": "leg-curl.webp" },
+    "ラットプルダウン": { "file": "lat-pulldown.webp" },
+    "シーテッドロー": { "file": "seated-row.webp" },
+    "チェストプレス": { "file": "chest-press.webp" },
+    "リアデルト・ペックフライ": { "file": "rear-delt-pec-fly.webp" },
+    "ロータリートルソー": { "file": "rotary-torso.webp" },
+    "アブドミナルクランチ": { "file": "abdominal-crunch.webp" },
+    "グルートキックバック": { "file": "glute-kickback.webp" },
+    "ショルダーマシン": { "file": "shoulder-machine.webp" },
+    "ヒップアブダクション": { "file": "hip-abduction.webp" },
+    "ヒップアダクション": { "file": "hip-adduction.webp" },
+    "パワーラック": { "file": "power-rack.webp" },
+    "スミスマシン": { "file": "smith-machine.webp" },
+    "ケーブルマシン": { "file": "cable-machine.webp" },
+    "プリチャーカール台": { "file": "preacher-curl.webp" },
+    "アジャスタブルベンチ": { "file": "adjustable-bench.webp" },
+    "マルチジャングル": { "file": "multi-jungle.webp" },
+    "インクラインチェストプレス": { "file": "incline-chest-press.webp" },
+    "45°レッグプレス": { "file": "leg-press-45.webp", "aliases": ["45℃レッグプレス"] },
+    "チンニング・ディップス": { "file": "chin-dip.webp", "aliases": ["チンニング・ディップススタンド"] },
+    "ベンチプレス台": { "file": "bench-press.webp" }
+  }
+}
