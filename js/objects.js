@@ -1,6 +1,6 @@
 const SERIALIZE_PROPS = [
-  "partId",
   "objectType",
+  "partId",
   "memoData",
   "partLabel",
   "partCategory",

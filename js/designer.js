@@ -1,4 +1,17 @@
-import { DRAWINGS, DEFAULT_PARTS } from "./constants.js";
+import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID } from "./constants.js";
+import {
+  refreshProjects,
+  setCachedProjects,
+  getCachedProjects,
+  getProjectSheets,
+  addImportedProposal,
+} from "./projects.js";
+import {
+  enablePolygonFill,
+  getFillStyle,
+  snapPoint,
+  setSnapEnabled,
+} from "./draw-tools.js";
 import { getInventoryParts, getCategoryOrder } from "./machine-inventory.js";
 import {
   loadMachineManifest,
@@ -31,9 +44,12 @@ const statusEl = document.getElementById("status");
 const memoTooltip = document.getElementById("memo-tooltip");
 
 let canvas;
+let currentProjectId = MASTER_PROJECT_ID;
+let currentSheets = DRAWINGS;
 let currentDrawingId = null;
 let currentPage = 1;
 let totalPages = 1;
+let polygonCleanup = null;
 let activeTool = "select";
 let pendingPart = null;
 let isPanning = false;
@@ -54,13 +70,18 @@ async function init() {
   applyProControls();
   initCanvas();
   await loadMachineManifest();
-  buildDrawingSelect();
+  const projects = await refreshProjects();
+  setCachedProjects(projects);
+  buildProjectSelect();
+  rebuildSheetSelect();
   setupToolbar();
   setupModals();
+  setupProposalModal();
   setupPropsForm();
+  setupDrawStyle();
   setupKeyboard();
   await rebuildPalette();
-  await loadDrawing(DRAWINGS[0].id);
+  await loadDrawing(currentSheets[0].id);
 }
 
 function initCanvas() {
@@ -130,16 +151,55 @@ function resizeCanvas() {
   canvas.requestRenderAll();
 }
 
-// ── Drawings ────────────────────────────────────────
-function buildDrawingSelect() {
-  const sel = document.getElementById("drawing-select");
-  DRAWINGS.forEach((d) => {
+// ── Projects & sheets ───────────────────────────────
+function buildProjectSelect() {
+  const sel = document.getElementById("project-select");
+  sel.onchange = () => switchProject(sel.value);
+  populateProjectSelect(getCachedProjects());
+}
+
+function populateProjectSelect(projects) {
+  const sel = document.getElementById("project-select");
+  sel.innerHTML = "";
+  projects.forEach((p) => {
     const opt = document.createElement("option");
-    opt.value = d.id;
-    opt.textContent = d.name;
+    opt.value = p.id;
+    const tag = p.type === "master" ? "" : p.author ? ` (${p.author})` : " (案)";
+    opt.textContent = p.name + tag;
     sel.appendChild(opt);
   });
-  sel.addEventListener("change", () => switchDrawing(sel.value));
+  if ([...sel.options].some((o) => o.value === currentProjectId)) {
+    sel.value = currentProjectId;
+  }
+}
+
+function rebuildSheetSelect() {
+  const sel = document.getElementById("drawing-select");
+  sel.innerHTML = "";
+  currentSheets = getProjectSheets(currentProjectId);
+  currentSheets.forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+  sel.onchange = () => switchDrawing(sel.value);
+}
+
+async function switchProject(projectId) {
+  if (currentDrawingId) persistCurrent();
+  currentProjectId = projectId;
+  currentPage = 1;
+  rebuildSheetSelect();
+  if (currentSheets.length) await loadDrawing(currentSheets[0].id);
+}
+
+function getCurrentSheet(id) {
+  return currentSheets.find((s) => s.id === id);
+}
+
+function isImageSheet(sheet) {
+  return sheet.kind === "image" || /\.(png|jpe?g|webp)$/i.test(sheet.file || "");
 }
 
 async function switchDrawing(id) {
@@ -148,22 +208,34 @@ async function switchDrawing(id) {
   await loadDrawing(id);
 }
 
+async function loadSheetBackground(sheet) {
+  if (isImageSheet(sheet)) {
+    totalPages = 1;
+    updatePageUI();
+    const src = sheet.file.startsWith("data:") ? sheet.file : sheet.file;
+    await loadDrawingImage(src);
+    return;
+  }
+  const pdf = await pdfToDataUrl(sheet.file, currentPage, 2);
+  totalPages = pdf.numPages;
+  updatePageUI();
+  await loadDrawingImage(pdf.dataUrl);
+}
+
 async function loadDrawing(id) {
-  const drawing = DRAWINGS.find((d) => d.id === id);
-  if (!drawing) return;
+  const sheet = getCurrentSheet(id);
+  if (!sheet) return;
   setStatus("図面を読み込み中…");
   currentDrawingId = id;
   document.getElementById("drawing-select").value = id;
   try {
-    const pdf = await pdfToDataUrl(drawing.file, currentPage, 2);
-    totalPages = pdf.numPages;
-    updatePageUI();
     canvas.clear();
     drawingImage = null;
-    await loadDrawingImage(pdf.dataUrl);
+    await loadSheetBackground(sheet);
     restoreDesign(pageKey());
     pushHistory(true);
-    setStatus(`${drawing.name} — ページ ${currentPage}`);
+    const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
+    setStatus(`${proj} / ${sheet.name} — ページ ${currentPage}`);
   } catch (err) {
     setStatus("図面の読み込みに失敗しました");
     console.error(err);
@@ -272,19 +344,74 @@ document.getElementById("btn-next-page").addEventListener("click", async () => {
 });
 
 async function reloadPage() {
-  const drawing = DRAWINGS.find((d) => d.id === currentDrawingId);
-  const pdf = await pdfToDataUrl(drawing.file, currentPage, 2);
+  const sheet = getCurrentSheet(currentDrawingId);
+  if (!sheet) return;
   updatePageUI();
   getUserObjects().forEach((o) => canvas.remove(o));
   if (drawingImage) canvas.remove(drawingImage);
   drawingImage = null;
-  await loadDrawingImage(pdf.dataUrl);
+  if (isImageSheet(sheet)) {
+    await loadDrawingImage(sheet.file);
+  } else {
+    const pdf = await pdfToDataUrl(sheet.file, currentPage, 2);
+    await loadDrawingImage(pdf.dataUrl);
+  }
   restoreDesign(pageKey());
-  setStatus(`${drawing.name} — ページ ${currentPage}`);
+  setStatus(`${sheet.name} — ページ ${currentPage}`);
 }
 
 function pageKey() {
-  return `${currentDrawingId}-p${currentPage}`;
+  return `${currentProjectId}-${currentDrawingId}-p${currentPage}`;
+}
+
+function getDrawStyle() {
+  const color = document.getElementById("fill-color")?.value || "#fbbf24";
+  const opacity = Number(document.getElementById("fill-opacity")?.value || 0.35);
+  return getFillStyle(color, opacity);
+}
+
+function setupDrawStyle() {
+  document.getElementById("snap-grid")?.addEventListener("change", (e) => {
+    setSnapEnabled(e.target.checked);
+  });
+}
+
+function setupProposalModal() {
+  document.getElementById("btn-import-proposal")?.addEventListener("click", () => {
+    document.getElementById("proposal-form").reset();
+    document.getElementById("proposal-modal").showModal();
+  });
+
+  document.getElementById("proposal-form")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("proposal-name").value.trim();
+    const author = document.getElementById("proposal-author").value.trim();
+    const file = document.getElementById("proposal-image").files?.[0];
+    if (!name || !file) return;
+
+    const fileRef = await readFileAsDataURL(file);
+
+    const entry = addImportedProposal({
+      name,
+      author,
+      sheets: [
+        {
+          id: "sheet-1",
+          name: name,
+          file: fileRef,
+          kind: file.type === "application/pdf" ? "pdf" : "image",
+        },
+      ],
+    });
+
+    document.getElementById("proposal-modal").close();
+    const projects = await refreshProjects();
+    setCachedProjects(projects);
+    populateProjectSelect(projects);
+    document.getElementById("project-select").value = entry.id;
+    await switchProject(entry.id);
+    flashStatus(`「${name}」を取り込みました`);
+  });
 }
 
 // ── Palette ─────────────────────────────────────────
@@ -406,7 +533,7 @@ function highlightSelectedPart() {
 // ── Canvas interaction ──────────────────────────────
 function onCanvasMouseDown(opt) {
   const e = opt.e;
-  if (activeTool === "line" || activeTool === "rect" || activeTool === "pen") return;
+  if (activeTool === "line" || activeTool === "rect" || activeTool === "pen" || activeTool === "fill-poly") return;
 
   if (e.button === 2) {
     const ptr = canvas.getPointer(e);
@@ -696,9 +823,20 @@ function setTool(tool) {
 
   if (tool === "line" || tool === "rect") {
     canvas.selection = false;
+    canvas.skipTargetFind = true;
     enableShapeDraw(tool);
+  } else if (tool === "fill-poly") {
+    canvas.selection = false;
+    canvas.skipTargetFind = true;
+    polygonCleanup = enablePolygonFill(canvas, getDrawStyle, () => {
+      polygonCleanup = null;
+      pushHistory();
+      setTool("select");
+    });
+    flashStatus("塗り：頂点をクリック → 始点で閉じる / Enterで確定 / Escで取消");
   } else if (tool === "place") {
     canvas.selection = false;
+    canvas.skipTargetFind = false;
   } else if (tool === "pan") {
     canvas.skipTargetFind = true;
   } else {
@@ -720,7 +858,7 @@ function updateCanvasCursor() {
     canvas.setCursor("crosshair");
     return;
   }
-  if (activeTool === "line" || activeTool === "rect") {
+  if (activeTool === "line" || activeTool === "rect" || activeTool === "fill-poly") {
     canvas.setCursor("crosshair");
     return;
   }
@@ -733,8 +871,9 @@ function enableShapeDraw(kind) {
   disableShapeDraw();
   let start = null;
   let shape = null;
+  const rectStyle = () => ({ ...getDrawStyle(), objectType: "fillArea" });
   shapeHandler = (opt) => {
-    const ptr = canvas.getPointer(opt.e);
+    const ptr = snapPoint(canvas.getPointer(opt.e), canvas, opt.e);
     const t = opt.e.type;
     if (t === "mousedown") {
       start = ptr;
@@ -746,9 +885,7 @@ function enableShapeDraw(kind) {
               top: ptr.y,
               width: 0,
               height: 0,
-              fill: "rgba(239,68,68,0.08)",
-              stroke: "#ef4444",
-              strokeWidth: 2,
+              ...rectStyle(),
             });
       canvas.add(shape);
     } else if (t === "mousemove" && start && shape) {
@@ -762,6 +899,9 @@ function enableShapeDraw(kind) {
         });
       canvas.requestRenderAll();
     } else if (t === "mouseup") {
+      if (kind === "rect" && shape && (shape.width < 4 || shape.height < 4)) {
+        canvas.remove(shape);
+      }
       start = null;
       shape = null;
       pushHistory();
@@ -774,6 +914,10 @@ function enableShapeDraw(kind) {
 }
 
 function disableShapeDraw() {
+  if (polygonCleanup) {
+    polygonCleanup();
+    polygonCleanup = null;
+  }
   if (!shapeHandler) return;
   canvas.off("mouse:down", shapeHandler);
   canvas.off("mouse:move", shapeHandler);
@@ -815,7 +959,24 @@ function setupPropsForm() {
 
 function applyPropToSelection(field) {
   const obj = canvas.getActiveObject();
-  if (!obj || obj.objectType !== "part") return;
+  if (!obj) return;
+
+  if (obj.objectType === "fillArea") {
+    if (field === "fill") {
+      const color = document.getElementById("prop-fill").value;
+      const opacity = Number(document.getElementById("fill-opacity")?.value || 0.35);
+      const style = getFillStyle(color, opacity);
+      obj.set({ fill: style.fill, stroke: style.stroke });
+    }
+    if (field === "stroke") {
+      obj.set("stroke", document.getElementById("prop-stroke").value);
+    }
+    canvas.requestRenderAll();
+    scheduleAutoSave();
+    return;
+  }
+
+  if (obj.objectType !== "part") return;
 
   if (field === "label") {
     updatePartLabel(obj, document.getElementById("prop-label").value);
@@ -885,6 +1046,29 @@ function updateProps() {
     });
     return;
   }
+
+  if (obj.objectType === "fillArea") {
+    form.hidden = false;
+    document.getElementById("machine-preview-panel").hidden = true;
+    content.innerHTML = `<p class="prop-type">塗りつぶし</p>`;
+    document.getElementById("prop-label").closest(".prop-field").hidden = true;
+    document.querySelectorAll("#props-form .prop-row").forEach((row, i) => {
+      row.hidden = i < 2;
+    });
+    document.getElementById("prop-rotation").closest(".prop-field").hidden = false;
+    document.getElementById("prop-fill").value = rgbaToHex(obj.fill) || "#fbbf24";
+    document.getElementById("prop-stroke").value = rgbToHex(obj.stroke) || "#fbbf24";
+    document.getElementById("prop-width").value = Math.round(obj.getScaledWidth());
+    document.getElementById("prop-height").value = Math.round(obj.getScaledHeight());
+    document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
+    document.getElementById("prop-rotation-val").textContent = `${Math.round(obj.angle || 0)}°`;
+    return;
+  }
+
+  document.getElementById("prop-label").closest(".prop-field").hidden = false;
+  document.querySelectorAll("#props-form .prop-row").forEach((row) => {
+    row.hidden = false;
+  });
 
   if (obj.objectType === "part") {
     const countLine = obj.inventoryCount
@@ -996,8 +1180,9 @@ function restoreDesign(key) {
 function exportPng() {
   persistCurrent();
   const a = document.createElement("a");
-  const name = DRAWINGS.find((d) => d.id === currentDrawingId)?.name ?? "design";
-  a.download = `renewal-${name}-p${currentPage}.png`;
+  const sheet = getCurrentSheet(currentDrawingId);
+  const name = sheet?.name ?? "design";
+  a.download = `renewal-${currentProjectId}-${name}-p${currentPage}.png`;
   a.href = canvas.toDataURL({ format: "png", multiplier: 2 });
   a.click();
   flashStatus("PNGをダウンロードしました");
@@ -1050,7 +1235,18 @@ function setStatus(msg) {
 function flashStatus(msg) {
   setStatus(msg);
   setTimeout(() => {
-    const d = DRAWINGS.find((x) => x.id === currentDrawingId);
-    if (d) setStatus(`${d.name} — ページ ${currentPage}`);
+    const sheet = getCurrentSheet(currentDrawingId);
+    if (sheet) {
+      const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
+      setStatus(`${proj} / ${sheet.name} — ページ ${currentPage}`);
+    }
   }, 2500);
+}
+
+function rgbaToHex(color) {
+  if (!color) return null;
+  if (color.startsWith("#")) return color;
+  const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (!m) return null;
+  return "#" + [m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, "0")).join("");
 }

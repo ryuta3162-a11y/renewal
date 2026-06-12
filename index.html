@@ -19,6 +19,10 @@
       </div>
 
       <div class="topbar-group">
+        <label class="topbar-label">案
+          <select id="project-select"></select>
+        </label>
+        <button class="btn btn-ghost btn-xs" id="btn-import-proposal" title="リニューアル案を取り込み">＋ 案</button>
         <label class="topbar-label">図面
           <select id="drawing-select"></select>
         </label>
@@ -32,8 +36,15 @@
         <button class="tool-btn" data-tool="place" title="パーツをドラッグして配置">⊞ 配置</button>
         <button class="tool-btn" data-tool="pen" title="フリーハンド (P)">✏ ペン</button>
         <button class="tool-btn" data-tool="line" title="直線">／ 線</button>
-        <button class="tool-btn" data-tool="rect" title="矩形">□ 枠</button>
+        <button class="tool-btn" data-tool="rect" title="矩形塗り">□ 矩形</button>
+        <button class="tool-btn" data-tool="fill-poly" title="多角形塗り（頂点クリック→始点で閉じる）">▧ 塗り</button>
         <button class="tool-btn" data-tool="pan" title="図面をドラッグして移動 (H)">✋ 移動</button>
+      </div>
+
+      <div class="topbar-group draw-style">
+        <label class="topbar-label mini">塗色<input type="color" id="fill-color" value="#fbbf24" /></label>
+        <label class="topbar-label mini">透明度<input type="range" id="fill-opacity" min="0.1" max="0.9" step="0.05" value="0.35" /></label>
+        <label class="topbar-label mini snap-label"><input type="checkbox" id="snap-grid" checked /> 吸着 <span class="snap-hint">(Shiftで微調整)</span></label>
       </div>
 
       <div class="topbar-group">
@@ -124,11 +135,39 @@
             <li>パーツ選択 → ドラッグで配置・試着</li>
             <li><strong>右クリック</strong>で微光メモを設置</li>
             <li>配置・移動は<strong>自動保存</strong>（ブラウザ内）</li>
+            <li><strong>▧塗り</strong>：頂点クリック→始点で閉じる / Enterで確定</li>
+            <li>「＋案」でリニューアル案画像を取り込み</li>
           </ul>
         </div>
       </aside>
     </div>
   </div>
+
+  <!-- リニューアル案取込 -->
+  <dialog id="proposal-modal" class="modal">
+    <form id="proposal-form" method="dialog">
+      <header class="modal-header">
+        <h3>リニューアル案を取り込み</h3>
+        <button type="button" class="btn-close" data-close>×</button>
+      </header>
+      <div class="modal-body">
+        <label class="prop-field">案の名称 <span class="req">*</span>
+          <input type="text" id="proposal-name" required placeholder="例：田中案・2025春" />
+        </label>
+        <label class="prop-field">作成者
+          <input type="text" id="proposal-author" placeholder="任意" />
+        </label>
+        <label class="prop-field">画像ファイル <span class="req">*</span>
+          <input type="file" id="proposal-image" accept="image/*,.pdf" required />
+        </label>
+        <p class="modal-note">PNG/JPG/PDFを取り込めます。共有用には proposals/ フォルダへの追加も可能です。</p>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
+        <button type="submit" class="btn btn-primary">取り込む</button>
+      </footer>
+    </form>
+  </dialog>
 
   <!-- 自作パーツ -->
   <dialog id="part-modal" class="modal">

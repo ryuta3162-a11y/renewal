@@ -52,6 +52,31 @@ body {
 }
 .page-info { font-size: 0.75rem; color: var(--muted); min-width: 3.5rem; text-align: center; }
 
+.draw-style {
+  border-left: 1px solid var(--border);
+  padding-left: 0.5rem;
+  gap: 0.5rem !important;
+}
+.topbar-label.mini {
+  font-size: 0.65rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+}
+.topbar-label.mini input[type="color"] {
+  width: 28px; height: 22px; padding: 0;
+  border: 1px solid var(--border); border-radius: 3px; cursor: pointer;
+}
+.topbar-label.mini input[type="range"] { width: 72px; }
+.snap-label {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.25rem !important;
+  white-space: nowrap;
+}
+.snap-hint { font-size: 0.58rem; color: var(--muted); }
+.modal-note { font-size: 0.7rem; color: var(--muted); line-height: 1.5; }
+
 .tools { border-left: 1px solid var(--border); border-right: 1px solid var(--border); padding: 0 0.6rem; }
 
 .tool-btn {
