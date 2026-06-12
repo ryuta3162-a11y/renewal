@@ -33,8 +33,9 @@ export function hexToRgba(hex, alpha) {
 export function getFillStyle(color, opacity) {
   return {
     fill: hexToRgba(color, opacity),
-    stroke: color,
-    strokeWidth: 1.5,
+    stroke: null,
+    strokeWidth: 0,
+    guideStroke: color,
   };
 }
 
@@ -53,7 +54,7 @@ export function enablePolygonFill(canvas, getStyle, onDone) {
       if (rubberLine) canvas.remove(rubberLine);
       const last = points[points.length - 1];
       rubberLine = new fabric.Line([last.x, last.y, ptr.x, ptr.y], {
-        stroke: getStyle().stroke,
+        stroke: getStyle().guideStroke,
         strokeWidth: 1,
         strokeDashArray: [4, 4],
         selectable: false,
@@ -68,8 +69,8 @@ export function enablePolygonFill(canvas, getStyle, onDone) {
           [...points, ptr].map((p) => ({ x: p.x, y: p.y })),
           {
             fill: style.fill,
-            stroke: style.stroke,
-            strokeWidth: 1,
+            stroke: null,
+            strokeWidth: 0,
             opacity: 0.85,
             selectable: false,
             evented: false,
@@ -97,8 +98,8 @@ export function enablePolygonFill(canvas, getStyle, onDone) {
         left: ptr.x,
         top: ptr.y,
         radius: points.length === 1 ? 5 : 3,
-        fill: points.length === 1 ? getStyle().stroke : "#fff",
-        stroke: getStyle().stroke,
+        fill: points.length === 1 ? getStyle().guideStroke : "#fff",
+        stroke: getStyle().guideStroke,
         strokeWidth: 2,
         originX: "center",
         originY: "center",
@@ -111,7 +112,7 @@ export function enablePolygonFill(canvas, getStyle, onDone) {
       if (points.length > 1) {
         const prev = points[points.length - 2];
         const line = new fabric.Line([prev.x, prev.y, ptr.x, ptr.y], {
-          stroke: getStyle().stroke,
+          stroke: getStyle().guideStroke,
           strokeWidth: 1.5,
           selectable: false,
           evented: false,

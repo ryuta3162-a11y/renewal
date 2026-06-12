@@ -29,6 +29,8 @@ import {
 } from "./parts-library.js";
 import {
   applyProControls,
+  applyInteractiveControls,
+  getPartBodyRect,
   placePart,
   createMemoPin,
   updatePartColors,
@@ -94,7 +96,11 @@ function initCanvas() {
   });
 
   canvas.on("object:modified", (e) => {
-    if (e.target?.objectType === "part") normalizePartAfterResize(e.target);
+    if (e.target?.objectType === "part") {
+      enforceMinPartSize(e.target);
+      normalizePartAfterResize(e.target);
+    }
+    if (e.target) applyInteractiveControls(e.target);
     pushHistory();
     updateProps();
     scheduleAutoSave();
@@ -112,11 +118,20 @@ function initCanvas() {
     pushHistory();
     scheduleAutoSave();
   });
-  canvas.on("object:scaling", updatePropsLive);
+  canvas.on("object:scaling", (e) => {
+    if (e.target) applyInteractiveControls(e.target);
+    updatePropsLive();
+  });
   canvas.on("object:moving", updatePropsLive);
   canvas.on("object:rotating", updatePropsLive);
-  canvas.on("selection:created", updateProps);
-  canvas.on("selection:updated", updateProps);
+  canvas.on("selection:created", (e) => {
+    e.selected?.forEach(applyInteractiveControls);
+    updateProps();
+  });
+  canvas.on("selection:updated", (e) => {
+    e.selected?.forEach(applyInteractiveControls);
+    updateProps();
+  });
   canvas.on("selection:cleared", updateProps);
   canvas.on("mouse:over", onObjectHover);
   canvas.on("mouse:out", onObjectOut);
@@ -628,20 +643,20 @@ async function onCanvasMouseUp(opt) {
 }
 
 async function addPartToCanvas(def, x, y, w, h) {
+  let obj;
   if (def.mark) {
-    const obj = createPartBox(
+    obj = createPartBox(
       { ...def, label: def.mark, w: w ?? def.w, h: h ?? def.h },
       x,
       y,
       w,
       h
     );
-    canvas.add(obj);
-    canvas.setActiveObject(obj);
-    return;
+  } else {
+    obj = await placePart(def, x, y, w, h);
   }
-  const obj = await placePart(def, x, y, w, h);
   canvas.add(obj);
+  applyInteractiveControls(obj);
   canvas.setActiveObject(obj);
 }
 
@@ -966,10 +981,7 @@ function applyPropToSelection(field) {
       const color = document.getElementById("prop-fill").value;
       const opacity = Number(document.getElementById("fill-opacity")?.value || 0.35);
       const style = getFillStyle(color, opacity);
-      obj.set({ fill: style.fill, stroke: style.stroke });
-    }
-    if (field === "stroke") {
-      obj.set("stroke", document.getElementById("prop-stroke").value);
+      obj.set({ fill: style.fill, stroke: null, strokeWidth: 0 });
     }
     canvas.requestRenderAll();
     scheduleAutoSave();
@@ -1004,9 +1016,22 @@ function applyPropToSelection(field) {
 function resizePart(obj, tw, th) {
   const cw = obj.getScaledWidth();
   const ch = obj.getScaledHeight();
-  if (!cw || !ch) return;
+  if (!cw || !ch || tw < 16 || th < 16) return;
   obj.set({ scaleX: (obj.scaleX * tw) / cw, scaleY: (obj.scaleY * th) / ch });
+  enforceMinPartSize(obj);
   normalizePartAfterResize(obj);
+  applyInteractiveControls(obj);
+}
+
+function enforceMinPartSize(obj) {
+  if (obj?.objectType !== "part") return;
+  const min = 16;
+  const w = obj.getScaledWidth();
+  const h = obj.getScaledHeight();
+  if (w >= min && h >= min) return;
+  const factor = Math.max(min / Math.max(w, 1), min / Math.max(h, 1));
+  obj.set({ scaleX: obj.scaleX * factor, scaleY: obj.scaleY * factor });
+  obj.setCoords();
 }
 
 function updatePropsLive() {
@@ -1048,6 +1073,7 @@ function updateProps() {
   }
 
   if (obj.objectType === "fillArea") {
+    applyInteractiveControls(obj);
     form.hidden = false;
     document.getElementById("machine-preview-panel").hidden = true;
     content.innerHTML = `<p class="prop-type">塗りつぶし</p>`;
@@ -1057,7 +1083,7 @@ function updateProps() {
     });
     document.getElementById("prop-rotation").closest(".prop-field").hidden = false;
     document.getElementById("prop-fill").value = rgbaToHex(obj.fill) || "#fbbf24";
-    document.getElementById("prop-stroke").value = rgbToHex(obj.stroke) || "#fbbf24";
+    document.getElementById("prop-stroke").closest(".prop-field").hidden = true;
     document.getElementById("prop-width").value = Math.round(obj.getScaledWidth());
     document.getElementById("prop-height").value = Math.round(obj.getScaledHeight());
     document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
@@ -1071,6 +1097,8 @@ function updateProps() {
   });
 
   if (obj.objectType === "part") {
+    document.getElementById("prop-stroke").closest(".prop-field").hidden =
+      !!obj.partImageMode && !obj._objects?.some((o) => o.type === "text" && (o.text === "✕" || o.text === "○"));
     const countLine = obj.inventoryCount
       ? `<p class="prop-meta">現状在庫: ${obj.inventoryCount}台</p>`
       : "";
@@ -1085,7 +1113,7 @@ function updateProps() {
     document.getElementById("prop-height").value = Math.round(obj.getScaledHeight());
     document.getElementById("prop-mm-w").value = obj.realWidthMm || "";
     document.getElementById("prop-mm-h").value = obj.realHeightMm || "";
-    const rect = obj._objects?.find((o) => o.type === "rect");
+    const rect = getPartBodyRect(obj);
     document.getElementById("prop-fill").value = rgbToHex(rect?.fill) || "#dbeafe";
     document.getElementById("prop-stroke").value = rgbToHex(rect?.stroke) || "#2563eb";
     document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
@@ -1169,6 +1197,10 @@ function restoreDesign(key) {
   fabric.util.enlivenObjects(data.objects, (objs) => {
     objs.forEach((o) => {
       upgradePartGroup(o);
+      if (o.objectType === "fillArea") {
+        o.set({ strokeWidth: 0, stroke: null, rx: 0, ry: 0 });
+        applyInteractiveControls(o);
+      }
       canvas.add(o);
     });
     if (drawingImage) drawingImage.sendToBack();

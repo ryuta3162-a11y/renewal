@@ -24,12 +24,48 @@ export function applyProControls() {
     transparentCorners: false,
     cornerColor: "#ffffff",
     cornerStrokeColor: "#3b82f6",
-    borderColor: "#3b82f6",
-    borderScaleFactor: 1.5,
-    cornerSize: 14,
-    cornerStyle: "circle",
-    padding: 8,
-    borderOpacityWhenMoving: 0.8,
+    borderColor: "#60a5fa",
+    borderScaleFactor: 1,
+    cornerSize: 8,
+    cornerStyle: "rect",
+    padding: 0,
+    borderOpacityWhenMoving: 0.9,
+    touchCornerSize: 24,
+  });
+}
+
+export function getPartBodyRect(group) {
+  if (!group?._objects) return null;
+  return group._objects.find((o) => o.partBody) || group._objects.find((o) => o.type === "rect");
+}
+
+export function applyInteractiveControls(obj) {
+  if (!obj || obj.objectType === "drawing" || obj.objectType === "memo" || obj.hasControls === false) return;
+  const w = obj.getScaledWidth?.() || obj.width || 80;
+  const h = obj.getScaledHeight?.() || obj.height || 60;
+  const minDim = Math.min(w, h);
+  const corner = Math.max(5, Math.min(8, Math.round(minDim * 0.14)));
+  obj.set({
+    cornerStyle: "rect",
+    cornerSize: corner,
+    touchCornerSize: Math.max(corner + 14, 22),
+    borderColor: "#60a5fa",
+    borderScaleFactor: 1,
+    padding: 0,
+  });
+  obj.setCoords();
+}
+
+function makeBodyRect(props) {
+  return new fabric.Rect({
+    rx: 0,
+    ry: 0,
+    strokeWidth: 0,
+    stroke: null,
+    partBody: true,
+    originX: "center",
+    originY: "center",
+    ...props,
   });
 }
 
@@ -68,11 +104,10 @@ function makeLabelBackdrop(boxW, boxH) {
   return new fabric.Rect({
     width: Math.max(boxW - 4, 16),
     height: Math.max(boxH - 4, 14),
-    fill: "rgba(255,255,255,0.88)",
-    stroke: "rgba(0,0,0,0.06)",
-    strokeWidth: 1,
-    rx: 3,
-    ry: 3,
+    fill: "rgba(255,255,255,0.82)",
+    strokeWidth: 0,
+    rx: 0,
+    ry: 0,
     originX: "center",
     originY: "center",
   });
@@ -100,8 +135,8 @@ function basePartProps(def, x, y) {
 
 export function reflowPartLabel(group) {
   if (group.partImageMode) return;
-  const rect = group._objects?.[0];
-  if (!rect || rect.type !== "rect" || rect.strokeWidth !== 2) return;
+  const rect = getPartBodyRect(group);
+  if (!rect || rect.type !== "rect") return;
 
   const label = group.partLabel || "パーツ";
   const boxW = rect.width;
@@ -115,7 +150,7 @@ export function reflowPartLabel(group) {
 }
 
 function scaleImageToFit(img, areaW, areaH) {
-  const scale = Math.min(areaW / img.width, areaH / img.height) * 0.92;
+  const scale = Math.min(areaW / img.width, areaH / img.height);
   img.set({
     scaleX: scale,
     scaleY: scale,
@@ -131,21 +166,15 @@ function buildImagePartObjects(def, width, height, img) {
   const objects = [];
 
   objects.push(
-    new fabric.Rect({
+    makeBodyRect({
       width,
       height,
-      fill: hasCaptionInImage ? "rgba(255,255,255,0.98)" : def.fill || "rgba(255,255,255,0.95)",
-      stroke: def.stroke || "#2563eb",
-      strokeWidth: hasCaptionInImage ? 1 : 2,
-      rx: 4,
-      ry: 4,
-      originX: "center",
-      originY: "center",
+      fill: hasCaptionInImage ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.96)",
     })
   );
 
   if (hasCaptionInImage) {
-    const scale = Math.min((width - 4) / img.width, (height - 4) / img.height);
+    const scale = Math.min(width / img.width, height / img.height);
     img.set({
       scaleX: scale,
       scaleY: scale,
@@ -157,28 +186,13 @@ function buildImagePartObjects(def, width, height, img) {
     return objects;
   }
 
-  scaleImageToFit(img, width - 8, height - CAPTION_H - 8);
+  scaleImageToFit(img, width - 4, height - CAPTION_H - 4);
   objects.push(img);
 
-  const capW = width - 4;
-  objects.push(
-    new fabric.Rect({
-      width: capW,
-      height: CAPTION_H,
-      fill: "rgba(255,255,255,0.95)",
-      stroke: "rgba(0,0,0,0.08)",
-      strokeWidth: 1,
-      rx: 2,
-      ry: 2,
-      originX: "center",
-      originY: "center",
-      top: height / 2 - CAPTION_H / 2 - 1,
-    })
-  );
-
+  const capW = width - 6;
   objects.push(
     new fabric.Textbox(label, {
-      width: capW - 6,
+      width: capW,
       fontSize: Math.max(7, Math.min(9, capW / (label.length * 0.55))),
       fill: "#1e293b",
       fontWeight: "600",
@@ -187,7 +201,7 @@ function buildImagePartObjects(def, width, height, img) {
       originY: "center",
       splitByGrapheme: true,
       lineHeight: 1.1,
-      top: height / 2 - CAPTION_H / 2 - 1,
+      top: height / 2 - CAPTION_H / 2 + 1,
     })
   );
 
@@ -218,6 +232,7 @@ export function createPartWithMachineImage(def, x, y, w, h) {
           imageHasLabel: !!def.imageHasLabel,
         });
         group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
+        applyInteractiveControls(group);
         resolve(group);
       },
       { crossOrigin: "anonymous" }
@@ -229,38 +244,47 @@ export function normalizePartAfterResize(group) {
   if (group.objectType !== "part" || group.type !== "group") return;
 
   if (group.partImageMode && group.imageUrl) {
-    const w = group.getScaledWidth();
-    const h = group.getScaledHeight();
+    const w = Math.max(group.getScaledWidth(), 16);
+    const h = Math.max(group.getScaledHeight(), 16);
     const { left, top, angle } = group;
+    const body = getPartBodyRect(group);
     const def = {
       id: group.partId,
       label: group.partLabel,
       category: group.partCategory,
-      fill: group._objects?.[0]?.fill,
-      stroke: group._objects?.[0]?.stroke,
+      fill: body?.fill,
       imageUrl: group.imageUrl,
       imageHasLabel: group.imageHasLabel,
     };
-    fabric.Image.fromURL(group.imageUrl, (img) => {
-      const objects = buildImagePartObjects(def, w, h, img);
-      group._objects = objects;
-      group.set({ scaleX: 1, scaleY: 1, left, top, angle, width: w, height: h });
-      group.dirty = true;
-      group.setCoords();
-    }, { crossOrigin: "anonymous" });
+    const token = (group._resizeToken = (group._resizeToken || 0) + 1);
+    fabric.Image.fromURL(
+      group.imageUrl,
+      (img) => {
+        if (group._resizeToken !== token) return;
+        const objects = buildImagePartObjects(def, w, h, img);
+        group._objects = objects;
+        group.set({ scaleX: 1, scaleY: 1, left, top, angle, width: w, height: h });
+        group.dirty = true;
+        group.setCoords();
+        applyInteractiveControls(group);
+        group.canvas?.requestRenderAll();
+      },
+      { crossOrigin: "anonymous" }
+    );
     return;
   }
 
-  const rect = group._objects?.find((o) => o.type === "rect" && o.strokeWidth === 2);
+  const rect = getPartBodyRect(group);
   if (!rect) return;
 
-  const w = group.getScaledWidth();
-  const h = group.getScaledHeight();
+  const w = Math.max(group.getScaledWidth(), 16);
+  const h = Math.max(group.getScaledHeight(), 16);
   const { left, top, angle } = group;
 
-  rect.set({ width: w, height: h, scaleX: 1, scaleY: 1 });
-  group.set({ scaleX: 1, scaleY: 1, left, top, angle });
+  rect.set({ width: w, height: h, scaleX: 1, scaleY: 1, rx: 0, ry: 0 });
+  group.set({ scaleX: 1, scaleY: 1, left, top, angle, width: w, height: h });
   reflowPartLabel(group);
+  applyInteractiveControls(group);
 }
 
 export function updatePartLabel(group, label) {
@@ -278,19 +302,25 @@ export function createPartBox(def, x, y, w, h) {
   const label = def.label || "パーツ";
   const objects = [];
 
-  objects.push(
-    new fabric.Rect({
-      width,
-      height,
-      fill: def.fill,
-      stroke: def.stroke,
-      strokeWidth: 2,
-      rx: 4,
-      ry: 4,
-      originX: "center",
-      originY: "center",
-    })
-  );
+  if (def.mark) {
+    objects.push(
+      makeBodyRect({
+        width,
+        height,
+        fill: def.fill,
+        stroke: def.stroke,
+        strokeWidth: 1.5,
+      })
+    );
+  } else {
+    objects.push(
+      makeBodyRect({
+        width,
+        height,
+        fill: def.fill,
+      })
+    );
+  }
 
   if (def.mark) {
     objects.push(
@@ -309,6 +339,7 @@ export function createPartBox(def, x, y, w, h) {
 
   const group = new fabric.Group(objects, basePartProps(def, x, y));
   group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
+  applyInteractiveControls(group);
   return group;
 }
 
@@ -322,6 +353,18 @@ export async function placePart(def, x, y, w, h) {
 
 export function upgradePartGroup(group) {
   if (group.objectType !== "part") return;
+  const body = getPartBodyRect(group);
+  if (body) {
+    body.set({ rx: 0, ry: 0 });
+    if (!group._objects?.some((o) => o.type === "text" && (o.text === "✕" || o.text === "○"))) {
+      body.set({ strokeWidth: 0, stroke: null });
+    }
+    body.set("partBody", true);
+  }
+  group._objects?.forEach((o) => {
+    if (o !== body && o.type === "rect") o.set({ rx: 0, ry: 0, strokeWidth: 0, stroke: null });
+  });
+  applyInteractiveControls(group);
   const isMark = group._objects?.some(
     (o) => o.type === "text" && (o.text === "✕" || o.text === "○")
   );
@@ -369,9 +412,12 @@ export function createMemoPin(x, y, data = {}) {
 
 export function updatePartColors(obj, fill, stroke) {
   if (obj.objectType !== "part" || obj.type !== "group") return;
-  const rect = obj._objects?.find((o) => o.type === "rect" && o.strokeWidth === 2);
+  const rect = getPartBodyRect(obj);
   if (rect) {
-    rect.set({ fill, stroke });
+    const isMark = obj._objects?.some(
+      (o) => o.type === "text" && (o.text === "✕" || o.text === "○")
+    );
+    rect.set({ fill, ...(isMark ? { stroke } : { strokeWidth: 0, stroke: null }) });
     obj.dirty = true;
   }
 }
