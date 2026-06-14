@@ -7,7 +7,12 @@ export const DRAWINGS = [
   { id: "kyodo-17", name: "原本-17", file: "/drawings/kyodo-17.pdf", kind: "pdf" },
   { id: "gyotoku-1", name: "行徳-図面1", file: "/drawings/gyotoku-1.pdf", kind: "pdf" },
   { id: "gyotoku-2", name: "行徳-図面2", file: "/drawings/gyotoku-2.pdf", kind: "pdf" },
-  { id: "mito", name: "みと図面", file: "/drawings/mito.pdf", kind: "pdf", planWidthMm: 29080 },
+  { id: "mito", name: "みと図面", file: "/drawings/mito-1.pdf", kind: "pdf", planWidthMm: 29080, pages: [
+    "/drawings/mito-1.pdf",
+    "/drawings/mito-2.pdf",
+    "/drawings/mito-3.pdf",
+    "/drawings/mito-4.pdf",
+  ] },
 ];
 
 export const STORAGE_PREFIX = "renewal-studio-";

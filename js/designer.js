@@ -263,6 +263,11 @@ function isImageSheet(sheet) {
   return sheet.kind === "image" || /\.(png|jpe?g|webp)$/i.test(sheet.file || "");
 }
 
+function getSheetPdfFile(sheet, pageNum = currentPage) {
+  if (sheet.pages?.length) return sheet.pages[Math.min(pageNum, sheet.pages.length) - 1];
+  return sheet.file;
+}
+
 async function switchDrawing(id) {
   if (currentDrawingId) persistCurrent();
   currentPage = 1;
@@ -277,8 +282,9 @@ async function loadSheetBackground(sheet) {
     await loadDrawingImage(src);
     return;
   }
-  const pdf = await pdfToDataUrl(sheet.file, currentPage, 2);
-  totalPages = pdf.numPages;
+  const pdf = await pdfToDataUrl(getSheetPdfFile(sheet), 1, 2);
+  if (!sheet.pages?.length) totalPages = pdf.numPages;
+  else totalPages = sheet.pages.length;
   updatePageUI();
   await loadDrawingImage(pdf.dataUrl);
 }
@@ -423,7 +429,7 @@ async function reloadPage() {
   if (isImageSheet(sheet)) {
     await loadDrawingImage(sheet.file);
   } else {
-    const pdf = await pdfToDataUrl(sheet.file, currentPage, 2);
+    const pdf = await pdfToDataUrl(getSheetPdfFile(sheet), 1, 2);
     await loadDrawingImage(pdf.dataUrl);
   }
   await restoreDesign(pageKey());

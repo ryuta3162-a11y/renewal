@@ -37,6 +37,8 @@ export function getMasterProject() {
       name: d.name,
       file: d.file,
       kind: d.kind || "pdf",
+      pages: d.pages,
+      planWidthMm: d.planWidthMm,
     })),
   };
 }
