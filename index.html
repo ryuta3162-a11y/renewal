@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Renewal Studio — リニューアル設計</title>
+  <title>Renewal Studio — 24KYODOWORKSPACE</title>
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
 </head>
@@ -14,7 +14,7 @@
         <span class="brand-mark">R</span>
         <div>
           <strong>Renewal Studio</strong>
-          <span class="brand-sub">経堂リニューアル設計</span>
+          <span class="brand-sub">24KYODOWORKSPACE リニューアル設計</span>
         </div>
       </div>
 
@@ -106,42 +106,9 @@
       <aside class="props-panel">
         <div class="panel-title">プロパティ</div>
         <div id="props-content">
-          <p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>
+          <p class="props-empty">区画を選択すると<br>名称とサイズが表示されます</p>
         </div>
-        <div id="props-form" hidden>
-          <label class="prop-field">名称
-            <input type="text" id="prop-label" />
-          </label>
-          <div class="prop-row">
-            <label class="prop-field">幅 (px)
-              <input type="number" id="prop-width" min="10" />
-            </label>
-            <label class="prop-field">高さ (px)
-              <input type="number" id="prop-height" min="10" />
-            </label>
-          </div>
-          <div class="prop-row">
-            <label class="prop-field">実寸 幅 (mm)
-              <input type="text" id="prop-mm-w" placeholder="例: 1200" />
-            </label>
-            <label class="prop-field">実寸 高 (mm)
-              <input type="text" id="prop-mm-h" placeholder="例: 800" />
-            </label>
-          </div>
-          <div class="prop-row">
-            <label class="prop-field">塗り色
-              <input type="color" id="prop-fill" />
-            </label>
-            <label class="prop-field">枠色
-              <input type="color" id="prop-stroke" />
-            </label>
-          </div>
-          <label class="prop-field">回転
-            <input type="range" id="prop-rotation" min="0" max="360" value="0" />
-            <span id="prop-rotation-val" class="prop-val">0°</span>
-          </label>
-        </div>
-        <button class="btn btn-ghost btn-block" id="btn-delete">選択を削除</button>
+        <button class="btn btn-danger btn-block" id="btn-delete" hidden>選択を削除</button>
         <div class="help-box">
           <p><strong>大枠づくり</strong></p>
           <ul>
@@ -151,7 +118,8 @@
             <li><strong>⬡区画</strong>：角をクリックして線で囲む</li>
             <li>始点クリック / <strong>Enter</strong> で確定、<strong>Backspace</strong> で1点戻す</li>
             <li><strong>右クリック / Esc</strong> で描画中の区画をやめる</li>
-            <li>区画を<strong>クリック</strong> → 修正 or 削除を選択</li>
+            <li><strong>↖ 選択</strong>で区画をクリック → 角の●をドラッグして形を変更</li>
+            <li>区画の中をドラッグすると<strong>移動</strong></li>
             <li><strong>↖ 選択</strong>で図面をクリック → 四隅ドラッグでサイズ変更（区画も連動）</li>
             <li>線を引くと<strong>横・縦 (m)</strong>が常に表示（区画・直線）</li>
             <li>区画に<strong>㎡・坪・m</strong>が自動表示（左の縮尺設定）</li>

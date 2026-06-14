@@ -20,7 +20,16 @@ import {
   removeOrphanZonePreviews,
   refreshZoneDisplay,
   ensureZoneDimensionMarkers,
+  updateZonePointsInPlace,
 } from "./zones.js";
+import {
+  showZoneVertexHandles,
+  hideZoneVertexHandles,
+  onZoneVertexHandleMoving,
+  onZoneBodyMoving,
+  normalizeZoneIfTransformed,
+  refreshActiveVertexHandles,
+} from "./zone-vertex-edit.js";
 import {
   addCustomZonePreset,
   updateCustomZonePreset,
@@ -95,7 +104,6 @@ let spaceDown = false;
 let lastPan = null;
 let placeStart = null;
 let placePreview = null;
-let zoneTapStart = null;
 let memoPendingPos = null;
 let editingMemo = null;
 let editingZone = null;
@@ -143,6 +151,19 @@ function initCanvas() {
 
   canvas.on("object:modified", (e) => {
     if (isRestoringHistory) return;
+    if (e.target?.objectType === "zoneVertex") {
+      const zone = e.target._zoneRef;
+      if (zone) {
+        normalizeZoneIfTransformed(zone);
+        refreshZoneDisplay(zone, computeZoneMetricsFor(zone));
+        refreshZoneHooksList();
+        refreshActiveVertexHandles(canvas);
+        pushHistory();
+        scheduleAutoSave();
+        updateProps();
+      }
+      return;
+    }
     if (e.target?.objectType === "drawing") {
       onDrawingTransformEnd();
       return;
@@ -152,8 +173,10 @@ function initCanvas() {
       normalizePartAfterResize(e.target);
     }
     if (e.target?.objectType === "zone") {
+      normalizeZoneIfTransformed(e.target);
       refreshZoneDisplay(e.target, computeZoneMetricsFor(e.target));
       refreshZoneHooksList();
+      refreshActiveVertexHandles(canvas);
     }
     if (e.target) applyInteractiveControls(e.target);
     pushHistory();
@@ -176,6 +199,21 @@ function initCanvas() {
     pushHistory();
     scheduleAutoSave();
   });
+  canvas.on("object:moving", (e) => {
+    if (e.target?.objectType === "zoneVertex") {
+      const snapOn = document.getElementById("snap-grid")?.checked;
+      const zone = onZoneVertexHandleMoving(e.target, canvas, snapOn);
+      if (zone) {
+        refreshZoneDisplay(zone, computeZoneMetricsFor(zone));
+        updatePropsLive();
+      }
+      return;
+    }
+    if (e.target?.objectType === "zone") {
+      onZoneBodyMoving(e.target, canvas);
+    }
+    updatePropsLive();
+  });
   canvas.on("object:scaling", (e) => {
     if (e.target?.objectType === "drawing" && !drawingTransformBefore) {
       drawingTransformBefore = captureDrawingState(drawingImage);
@@ -188,17 +226,31 @@ function initCanvas() {
       drawingTransformBefore = captureDrawingState(drawingImage);
     }
   });
-  canvas.on("object:moving", updatePropsLive);
   canvas.on("object:rotating", updatePropsLive);
   canvas.on("selection:created", (e) => {
+    const obj = e.selected?.[0];
+    if (obj?.objectType === "zone") {
+      normalizeZoneIfTransformed(obj);
+      showZoneVertexHandles(obj, canvas);
+      refreshZoneDisplay(obj, computeZoneMetricsFor(obj));
+    }
     e.selected?.forEach(applyInteractiveControls);
     updateProps();
   });
   canvas.on("selection:updated", (e) => {
+    const obj = e.selected?.[0];
+    if (obj?.objectType === "zone") {
+      normalizeZoneIfTransformed(obj);
+      showZoneVertexHandles(obj, canvas);
+      refreshZoneDisplay(obj, computeZoneMetricsFor(obj));
+    }
     e.selected?.forEach(applyInteractiveControls);
     updateProps();
   });
-  canvas.on("selection:cleared", updateProps);
+  canvas.on("selection:cleared", () => {
+    hideZoneVertexHandles(canvas);
+    updateProps();
+  });
   canvas.on("mouse:over", onObjectHover);
   canvas.on("mouse:out", onObjectOut);
 
@@ -207,6 +259,7 @@ function initCanvas() {
     let z = canvas.getZoom() * 0.999 ** e.deltaY;
     z = Math.min(Math.max(z, 0.15), 10);
     canvas.zoomToPoint({ x: e.offsetX, y: e.offsetY }, z);
+    refreshActiveVertexHandles(canvas);
     scheduleAutoSave();
     e.preventDefault();
     e.stopPropagation();
@@ -500,8 +553,6 @@ function setupDrawStyle() {
 
 function setupZoneUI() {
   buildZoneHooks();
-  setupZoneModal();
-  setupZoneActionModal();
   setupCustomPresetModal();
   setupScaleUI();
 
@@ -911,8 +962,9 @@ function refreshZoneHooksList() {
         : `${baseName}${numTag}${sizeSuffix}`;
       btn.addEventListener("click", () => {
         canvas.setActiveObject(zone);
+        showZoneVertexHandles(zone, canvas);
         canvas.requestRenderAll();
-        openZoneAction(zone);
+        updateProps();
       });
       li.appendChild(btn);
       list.appendChild(li);
@@ -1009,12 +1061,11 @@ function deleteZone(zone) {
   const name = zone.zoneName || "区画";
   if (!confirm(`「${name}」を削除しますか？`)) return;
 
+  hideZoneVertexHandles(canvas);
   canvas.remove(zone);
   if (editingZone === zone) editingZone = null;
   if (zoneActionTarget === zone) zoneActionTarget = null;
   canvas.discardActiveObject();
-  document.getElementById("zone-action-modal")?.close();
-  document.getElementById("zone-modal")?.close();
   pushHistory();
   refreshZoneHooksList();
   scheduleAutoSave();
@@ -1210,11 +1261,6 @@ function onCanvasMouseDown(opt) {
 
   if (activeTool === "line" || activeTool === "pen" || activeTool === "zone") return;
 
-  if (e.button === 0 && activeTool === "select" && opt.target?.objectType === "zone") {
-    zoneTapStart = { x: e.clientX, y: e.clientY, target: opt.target };
-    return;
-  }
-
   if (e.button === 2) {
     const ptr = canvas.getPointer(e);
     if (opt.target?.objectType === "memo") {
@@ -1279,16 +1325,6 @@ function onCanvasMouseMove(opt) {
 }
 
 async function onCanvasMouseUp(opt) {
-  if (zoneTapStart && activeTool === "select") {
-    const e = opt.e;
-    const moved = Math.hypot(e.clientX - zoneTapStart.x, e.clientY - zoneTapStart.y);
-    if (moved < 6 && opt.target?.objectType === "zone") {
-      canvas.setActiveObject(opt.target);
-      openZoneAction(opt.target);
-    }
-    zoneTapStart = null;
-  }
-
   if (isPanning) {
     isPanning = false;
     lastPan = null;
@@ -1361,7 +1397,7 @@ function showZoneTooltip(e, zone) {
     : `<span style="color:var(--muted)">縮尺未設定 — 左パネルで設定</span>`;
   zoneTooltip.innerHTML = memo
     ? `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}${esc(memo)}`
-    : `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}<span style="color:var(--muted)">クリックで修正・削除</span>`;
+    : `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}<span style="color:var(--muted)">角をドラッグで形を変更</span>`;
   zoneTooltip.hidden = false;
   const wrap = canvasWrap.getBoundingClientRect();
   zoneTooltip.style.left = `${e.clientX - wrap.left + 12}px`;
@@ -1542,6 +1578,8 @@ function setTool(tool) {
     canvas.skipTargetFind = true;
     enableShapeDraw(tool);
   } else if (tool === "zone") {
+    hideZoneVertexHandles(canvas);
+    canvas.discardActiveObject();
     canvas.selection = false;
     canvas.skipTargetFind = true;
     polygonCleanup = enableZoneDraw(
@@ -1554,10 +1592,11 @@ function setTool(tool) {
           return;
         }
         pushHistory();
-        applyInteractiveControls(zone);
+        canvas.setActiveObject(zone);
+        showZoneVertexHandles(zone, canvas);
         refreshZoneHooksList();
-        openZoneModal(zone);
         setTool("select");
+        updateProps();
       },
       (points) => computeZoneMetricsFromCanvasPoints(points, drawingImage, currentMmPerImagePx),
       (a, b) => segmentMetrics(a, b, drawingImage, currentMmPerImagePx),
@@ -1714,6 +1753,7 @@ function deleteSelected() {
 function zoomCanvas(factor) {
   const z = Math.min(Math.max(canvas.getZoom() * factor, 0.15), 10);
   canvas.zoomToPoint({ x: canvas.getWidth() / 2, y: canvas.getHeight() / 2 }, z);
+  refreshActiveVertexHandles(canvas);
 }
 
 // ── Properties ────────────────────────────────────
@@ -1802,32 +1842,29 @@ function enforceMinPartSize(obj) {
 }
 
 function updatePropsLive() {
-  const obj = canvas.getActiveObject();
+  let obj = canvas.getActiveObject();
+  if (obj?.objectType === "zoneVertex") obj = obj._zoneRef;
   if (!obj) return;
-  if (obj.objectType === "drawing") {
+  if (obj.objectType === "drawing" || obj.objectType === "zone") {
     updateProps();
-    return;
   }
-  document.getElementById("prop-width").value = Math.round(obj.getScaledWidth());
-  document.getElementById("prop-height").value = Math.round(obj.getScaledHeight());
-  document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
-  document.getElementById("prop-rotation-val").textContent = `${Math.round(obj.angle || 0)}°`;
 }
 
 function updateProps() {
-  const obj = canvas.getActiveObject();
+  let obj = canvas.getActiveObject();
+  if (obj?.objectType === "zoneVertex") obj = obj._zoneRef;
   const content = document.getElementById("props-content");
-  const form = document.getElementById("props-form");
+  const btnDelete = document.getElementById("btn-delete");
 
   if (!obj) {
-    content.innerHTML = `<p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>`;
-    form.hidden = true;
+    content.innerHTML = `<p class="props-empty">区画を選択すると<br>名称とサイズが表示されます</p>`;
+    if (btnDelete) btnDelete.hidden = true;
     if (MACHINES_UI_ENABLED && pendingPart) showMachinePreview(pendingPart);
     return;
   }
 
   if (obj.objectType === "drawing") {
-    form.hidden = true;
+    if (btnDelete) btnDelete.hidden = true;
     const pct = Math.round((obj.scaleX || 1) * 100);
     const w = Math.round(obj.getScaledWidth());
     const h = Math.round(obj.getScaledHeight());
@@ -1849,7 +1886,7 @@ function updateProps() {
   }
 
   if (obj.objectType === "memo") {
-    form.hidden = true;
+    if (btnDelete) btnDelete.hidden = false;
     const d = obj.memoData || {};
     content.innerHTML = `
       <p class="prop-type">微光メモ</p>
@@ -1865,44 +1902,24 @@ function updateProps() {
 
   if (obj.objectType === "zone" || obj.objectType === "fillArea") {
     if (obj.objectType === "fillArea") upgradeZoneObject(obj);
-    applyInteractiveControls(obj);
-    form.hidden = false;
-    const memo = obj.zoneMemo?.trim();
+    if (btnDelete) btnDelete.hidden = true;
     const metrics = obj._zoneMetrics;
     const sizeBlock = metrics
       ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics).replace("\n", " · "))}</p>`
       : `<p class="prop-meta" style="color:var(--muted)">サイズ: 縮尺未設定</p>`;
     content.innerHTML = `
       <p class="prop-type">区画</p>
-      <p class="prop-meta">${esc(obj.zoneName || "区画")}</p>
+      <p class="prop-meta prop-name">${esc(obj.zoneName || "区画")}</p>
       ${sizeBlock}
-      ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : `<p class="prop-meta" style="color:var(--muted)">メモなし</p>`}
-      <div class="zone-prop-actions">
-        <button class="btn btn-primary btn-sm" id="btn-edit-zone">✎ 修正</button>
-        <button class="btn btn-danger btn-sm zone-delete-btn" id="btn-delete-zone" title="削除">🗑</button>
-      </div>
+      <p class="prop-meta prop-hint">角の●をドラッグして形を変更<br>面内ドラッグで移動</p>
+      <button class="btn btn-danger btn-block btn-sm" id="btn-delete-zone">この区画を削除</button>
     `;
-    document.getElementById("btn-edit-zone")?.addEventListener("click", () => openZoneModal(obj));
     document.getElementById("btn-delete-zone")?.addEventListener("click", () => deleteZone(obj));
-    document.getElementById("prop-label").closest(".prop-field").hidden = false;
-    document.querySelectorAll("#props-form .prop-row").forEach((row) => {
-      row.hidden = true;
-    });
-    document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
-    document.getElementById("prop-stroke").closest(".prop-field").hidden = true;
-    document.getElementById("prop-label").value = obj.zoneName || "";
-    document.getElementById("prop-fill").value = rgbToHex(obj.zoneColor) || "#f59e0b";
     return;
   }
 
-  document.getElementById("prop-label").closest(".prop-field").hidden = false;
-  document.querySelectorAll("#props-form .prop-row").forEach((row) => {
-    row.hidden = false;
-  });
-
   if (obj.objectType === "part" && MACHINES_UI_ENABLED) {
-    document.getElementById("prop-stroke").closest(".prop-field").hidden =
-      !!obj.partImageMode && !obj._objects?.some((o) => o.type === "text" && (o.text === "✕" || o.text === "○"));
+    if (btnDelete) btnDelete.hidden = false;
     const countLine = obj.inventoryCount
       ? `<p class="prop-meta">現状在庫: ${obj.inventoryCount}台</p>`
       : "";

@@ -196,9 +196,43 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
     subTargetCheck: false,
   });
 
-  group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
   updateZoneDimensions(group, metrics);
   return group;
+}
+
+/** キャンバス座標の頂点配列で区画形状を更新（scale/angle を 1/0 に正規化） */
+export function updateZonePointsInPlace(zone, canvasPoints) {
+  if (!zone || canvasPoints.length < 3) return;
+  const poly = zone._objects?.[0];
+  if (!poly || poly.type !== "polygon") return;
+
+  const c = polygonCentroid(canvasPoints);
+  const localPoints = canvasPoints.map((p) => ({ x: p.x - c.x, y: p.y - c.y }));
+
+  poly.set({ points: localPoints });
+  if (typeof poly._setPositionDimensions === "function") {
+    poly._setPositionDimensions({});
+  }
+  poly.setCoords();
+  poly.dirty = true;
+
+  zone.set({
+    left: c.x,
+    top: c.y,
+    scaleX: 1,
+    scaleY: 1,
+    angle: 0,
+    skewX: 0,
+    skewY: 0,
+  });
+
+  if (typeof zone.triggerLayout === "function") {
+    zone.triggerLayout();
+  } else if (typeof zone._calcBounds === "function") {
+    zone._calcBounds();
+  }
+  zone.setCoords();
+  zone.dirty = true;
 }
 
 export function updateZoneLabel(group, metrics = undefined) {

@@ -1,6 +1,6 @@
 import { CATEGORY_COLORS } from "./parts-library.js";
 
-/** 経堂ジム 現状マシン・設備一覧（2025時点） */
+/** 24KYODOWORKSPACE 現状マシン・設備一覧（2025時点） */
 const INVENTORY = [
   // 有酸素マシン
   { category: "有酸素", label: "ランニングマシン", count: 13, w: 95, h: 42 },
