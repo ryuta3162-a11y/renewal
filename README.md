@@ -1,6 +1,6 @@
 # Renewal Studio
 
-24KYODOWORKSPACE（JOYFIT24経堂）のリニューアルを、竣工図の上に機器を配置したりデッサンしたりしながら検討するWebアプリです。
+経堂物件のリニューアルを、竣工図の上に機器を配置したりデッサンしたりしながら検討するWebアプリです。
 
 **Node.js 不要** — HTML/CSS/JS のみ。GitHub に push して Vercel にデプロイするだけで動きます。
 
