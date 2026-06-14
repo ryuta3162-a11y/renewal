@@ -12,12 +12,18 @@ import {
 } from "./draw-tools.js";
 import {
   ZONE_PRESETS,
+  getAllZonePresets,
   enableZoneDraw,
   updateZoneLabel,
   updateZoneColors,
   upgradeZoneObject,
   removeOrphanZonePreviews,
 } from "./zones.js";
+import {
+  addCustomZonePreset,
+  updateCustomZonePreset,
+  deleteCustomZonePreset,
+} from "./zone-custom-presets.js";
 import { getInventoryParts, getCategoryOrder } from "./machine-inventory.js";
 import {
   loadMachineManifest,
@@ -72,6 +78,7 @@ let memoPendingPos = null;
 let editingMemo = null;
 let editingZone = null;
 let zoneActionTarget = null;
+let editingCustomPresetId = null;
 let drawingImage = null;
 let autoSaveTimer = null;
 let lastSavedAt = null;
@@ -418,6 +425,7 @@ function setupZoneUI() {
   buildZoneHooks();
   setupZoneModal();
   setupZoneActionModal();
+  setupCustomPresetModal();
 
   document.getElementById("btn-hooks-expand-all")?.addEventListener("click", () => {
     setAllHooksCollapsed(false);
@@ -450,64 +458,159 @@ function saveHookCollapsedState(map) {
 }
 
 function buildZoneHooks() {
-  const container = document.getElementById("zone-hooks");
-  if (!container) return;
+  const customContainer = document.getElementById("zone-custom-hooks");
+  const standardContainer = document.getElementById("zone-hooks");
+  if (!standardContainer) return;
+
   const collapsed = loadHookCollapsedState();
-  container.innerHTML = "";
+  customContainer.innerHTML = "";
+  standardContainer.innerHTML = "";
+
+  const customs = getAllZonePresets().filter((p) => p.isCustom);
+  if (!customs.length) {
+    customContainer.innerHTML = `<p class="zone-custom-empty">「＋ 追加」で名称・色を自由に設定</p>`;
+  } else {
+    customs.forEach((preset) => {
+      customContainer.appendChild(createZoneHookElement(preset, collapsed, true));
+    });
+  }
 
   ZONE_PRESETS.forEach((preset) => {
-    const hook = document.createElement("section");
-    hook.className = "zone-hook";
-    hook.dataset.presetId = preset.id;
-    if (collapsed[preset.id]) hook.classList.add("collapsed");
-    if (preset.id === pendingZonePreset?.id) hook.classList.add("active");
-
-    hook.innerHTML = `
-      <button type="button" class="zone-hook-header" aria-expanded="${!collapsed[preset.id]}">
-        <span class="zone-hook-bar" style="background:${preset.color}"></span>
-        <span class="zone-hook-title">${esc(preset.name)}</span>
-        <span class="zone-hook-count" data-count-for="${preset.id}">0</span>
-        <span class="zone-hook-chevron">▼</span>
-      </button>
-      <div class="zone-hook-body">
-        <p class="zone-hook-desc">${esc(preset.desc || "")}</p>
-        <button type="button" class="btn btn-primary btn-sm btn-block btn-draw-zone">区画を描く</button>
-        <ul class="zone-hook-list" data-list-for="${preset.id}"></ul>
-      </div>
-    `;
-
-    const header = hook.querySelector(".zone-hook-header");
-    header.addEventListener("click", (e) => {
-      if (e.target.closest(".btn-draw-zone")) return;
-      const isCollapsed = hook.classList.toggle("collapsed");
-      header.setAttribute("aria-expanded", String(!isCollapsed));
-      const state = loadHookCollapsedState();
-      state[preset.id] = isCollapsed;
-      saveHookCollapsedState(state);
-      selectZonePreset(preset, false);
-    });
-
-    hook.querySelector(".btn-draw-zone").addEventListener("click", (e) => {
-      e.stopPropagation();
-      hook.classList.remove("collapsed");
-      header.setAttribute("aria-expanded", "true");
-      const state = loadHookCollapsedState();
-      state[preset.id] = false;
-      saveHookCollapsedState(state);
-      selectZonePreset(preset, true);
-    });
-
-    container.appendChild(hook);
+    standardContainer.appendChild(createZoneHookElement(preset, collapsed, false));
   });
 
-  if (!Object.keys(collapsed).length && ZONE_PRESETS[0]) {
-    const first = container.querySelector(".zone-hook");
+  if (!Object.keys(collapsed).length) {
+    const first =
+      customContainer.querySelector(".zone-hook") || standardContainer.querySelector(".zone-hook");
     first?.classList.remove("collapsed");
     first?.querySelector(".zone-hook-header")?.setAttribute("aria-expanded", "true");
   }
 
+  if (!pendingZonePreset) pendingZonePreset = ZONE_PRESETS[0];
   updateZoneActiveLabel();
   refreshZoneHooksList();
+}
+
+function createZoneHookElement(preset, collapsed, isCustom) {
+  const hook = document.createElement("section");
+  hook.className = "zone-hook" + (isCustom ? " zone-hook-custom" : "");
+  hook.dataset.presetId = preset.id;
+  if (collapsed[preset.id]) hook.classList.add("collapsed");
+  if (preset.id === pendingZonePreset?.id) hook.classList.add("active");
+
+  const customActions = isCustom
+    ? `<button type="button" class="zone-hook-edit" title="区分を編集">✎</button>
+       <button type="button" class="zone-hook-del" title="区分を削除">×</button>`
+    : "";
+
+  hook.innerHTML = `
+    <button type="button" class="zone-hook-header" aria-expanded="${!collapsed[preset.id]}">
+      <span class="zone-hook-bar" style="background:${preset.color}"></span>
+      <span class="zone-hook-title">${esc(preset.name)}</span>
+      <span class="zone-hook-count" data-count-for="${preset.id}">0</span>
+      ${customActions}
+      <span class="zone-hook-chevron">▼</span>
+    </button>
+    <div class="zone-hook-body">
+      <p class="zone-hook-desc">${esc(preset.desc || "")}</p>
+      <button type="button" class="btn btn-primary btn-sm btn-block btn-draw-zone">区画を描く</button>
+      <ul class="zone-hook-list" data-list-for="${preset.id}"></ul>
+    </div>
+  `;
+
+  const header = hook.querySelector(".zone-hook-header");
+  header.addEventListener("click", (e) => {
+    if (e.target.closest(".btn-draw-zone, .zone-hook-edit, .zone-hook-del")) return;
+    const isCollapsed = hook.classList.toggle("collapsed");
+    header.setAttribute("aria-expanded", String(!isCollapsed));
+    const state = loadHookCollapsedState();
+    state[preset.id] = isCollapsed;
+    saveHookCollapsedState(state);
+    selectZonePreset(preset, false);
+  });
+
+  hook.querySelector(".btn-draw-zone").addEventListener("click", (e) => {
+    e.stopPropagation();
+    hook.classList.remove("collapsed");
+    header.setAttribute("aria-expanded", "true");
+    const state = loadHookCollapsedState();
+    state[preset.id] = false;
+    saveHookCollapsedState(state);
+    selectZonePreset(preset, true);
+  });
+
+  hook.querySelector(".zone-hook-edit")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openCustomPresetModal(preset);
+  });
+
+  hook.querySelector(".zone-hook-del")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!confirm(`自作区分「${preset.name}」を一覧から削除しますか？\n（図面上の区画は残ります）`)) return;
+    deleteCustomZonePreset(preset.id);
+    if (pendingZonePreset?.id === preset.id) pendingZonePreset = ZONE_PRESETS[0];
+    buildZoneHooks();
+    flashStatus(`「${preset.name}」を一覧から削除しました`);
+  });
+
+  return hook;
+}
+
+function setupCustomPresetModal() {
+  document.getElementById("btn-add-zone-preset")?.addEventListener("click", () => {
+    openCustomPresetModal(null);
+  });
+
+  document.getElementById("custom-preset-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = document.getElementById("custom-preset-name").value.trim();
+    if (!name) return;
+    const data = {
+      name,
+      color: document.getElementById("custom-preset-color").value,
+      opacity: Number(document.getElementById("custom-preset-opacity").value),
+      desc: document.getElementById("custom-preset-desc").value.trim() || "自作の区画区分",
+    };
+
+    let preset;
+    if (editingCustomPresetId) {
+      preset = updateCustomZonePreset(editingCustomPresetId, data);
+    } else {
+      preset = addCustomZonePreset(data);
+    }
+
+    document.getElementById("custom-preset-modal").close();
+    editingCustomPresetId = null;
+    buildZoneHooks();
+    if (preset) selectZonePreset(preset, true);
+    flashStatus(`「${name}」を保存しました`);
+  });
+
+  document.getElementById("custom-preset-delete")?.addEventListener("click", () => {
+    if (!editingCustomPresetId) return;
+    const id = editingCustomPresetId;
+    const name = document.getElementById("custom-preset-name").value.trim();
+    if (!confirm(`自作区分「${name}」を削除しますか？`)) return;
+    deleteCustomZonePreset(id);
+    document.getElementById("custom-preset-modal").close();
+    editingCustomPresetId = null;
+    if (pendingZonePreset?.id === id) pendingZonePreset = ZONE_PRESETS[0];
+    buildZoneHooks();
+  });
+}
+
+function openCustomPresetModal(preset) {
+  editingCustomPresetId = preset?.id ?? null;
+  document.getElementById("custom-preset-modal-title").textContent = preset
+    ? "自作区分を編集"
+    : "自作区分を追加";
+  document.getElementById("custom-preset-name").value = preset?.name ?? "";
+  document.getElementById("custom-preset-color").value = preset?.color ?? "#a78bfa";
+  document.getElementById("custom-preset-opacity").value = preset?.opacity ?? 0.3;
+  document.getElementById("custom-preset-desc").value =
+    preset?.desc && preset.desc !== "自作の区画区分" ? preset.desc : "";
+  document.getElementById("custom-preset-delete").hidden = !preset;
+  document.getElementById("custom-preset-modal").showModal();
 }
 
 function setAllHooksCollapsed(collapsed) {
@@ -527,15 +630,17 @@ function getZonesOnCanvas() {
 function refreshZoneHooksList() {
   if (!canvas) return;
   const zones = getZonesOnCanvas();
-  const counts = Object.fromEntries(ZONE_PRESETS.map((p) => [p.id, 0]));
+  const allPresets = getAllZonePresets();
+  const counts = Object.fromEntries(allPresets.map((p) => [p.id, 0]));
 
   zones.forEach((z) => {
-    const id = z.zonePresetId || ZONE_PRESETS.find((p) => p.name === z.zoneName)?.id || "other";
+    if (!z.zoneInstanceId) z.set("zoneInstanceId", crypto.randomUUID());
+    const id = resolveZonePresetId(z, allPresets);
     if (counts[id] !== undefined) counts[id]++;
     else counts.other = (counts.other || 0) + 1;
   });
 
-  ZONE_PRESETS.forEach((preset) => {
+  allPresets.forEach((preset) => {
     const countEl = document.querySelector(`[data-count-for="${preset.id}"]`);
     if (countEl) countEl.textContent = String(counts[preset.id] || 0);
 
@@ -543,17 +648,14 @@ function refreshZoneHooksList() {
     if (!list) return;
     list.innerHTML = "";
 
-    const matched = zones.filter((z) => {
-      const id = z.zonePresetId || ZONE_PRESETS.find((p) => p.name === z.zoneName)?.id;
-      return id === preset.id;
-    });
+    const matched = zones.filter((z) => resolveZonePresetId(z, allPresets) === preset.id);
 
     if (!matched.length) {
       const li = document.createElement("li");
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "zone-hook-item empty";
-      btn.textContent = "まだ区画なし";
+      btn.textContent = "まだ区画なし（何個でも追加可）";
       li.appendChild(btn);
       list.appendChild(li);
       return;
@@ -565,9 +667,11 @@ function refreshZoneHooksList() {
       btn.type = "button";
       btn.className = "zone-hook-item";
       const memo = zone.zoneMemo?.trim();
+      const baseName = zone.zoneName || preset.name;
+      const numTag = matched.length > 1 ? ` #${i + 1}` : "";
       btn.textContent = memo
-        ? `${zone.zoneName || preset.name} — ${memo.slice(0, 18)}${memo.length > 18 ? "…" : ""}`
-        : zone.zoneName || `${preset.name} ${i + 1}`;
+        ? `${baseName}${numTag} — ${memo.slice(0, 16)}${memo.length > 16 ? "…" : ""}`
+        : `${baseName}${numTag}`;
       btn.addEventListener("click", () => {
         canvas.setActiveObject(zone);
         canvas.requestRenderAll();
@@ -577,6 +681,14 @@ function refreshZoneHooksList() {
       list.appendChild(li);
     });
   });
+}
+
+function resolveZonePresetId(zone, allPresets = getAllZonePresets()) {
+  if (zone.zonePresetId && allPresets.some((p) => p.id === zone.zonePresetId)) {
+    return zone.zonePresetId;
+  }
+  const byName = allPresets.find((p) => p.name === zone.zoneName);
+  return byName?.id || "other";
 }
 
 function selectZonePreset(preset, startDraw = true) {

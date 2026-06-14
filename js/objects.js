@@ -15,6 +15,7 @@ const SERIALIZE_PROPS = [
   "zoneColor",
   "zoneOpacity",
   "zonePresetId",
+  "zoneInstanceId",
 ];
 
 const LABEL_PAD = 5;

@@ -87,6 +87,52 @@ body {
 
 .zone-sidebar { display: flex; flex-direction: column; }
 .hook-toolbar { display: flex; gap: 0.2rem; }
+.panel-title.sub { font-size: 0.72rem; color: var(--muted); }
+
+.zone-custom-section {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--border);
+}
+.zone-hooks-compact { margin-bottom: 0; }
+.zone-hooks-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.35rem 0 0.45rem;
+  font-size: 0.62rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.zone-hooks-divider::before,
+.zone-hooks-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.zone-hook-edit,
+.zone-hook-del {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.68rem;
+  padding: 0.15rem 0.25rem;
+  font-family: inherit;
+}
+.zone-hook-edit:hover { color: var(--primary); }
+.zone-hook-del:hover { color: var(--danger); }
+.zone-hook-custom .zone-hook-header { padding-right: 0.35rem; }
+
+.zone-custom-empty {
+  font-size: 0.65rem;
+  color: var(--muted);
+  line-height: 1.45;
+  padding: 0.35rem 0.2rem 0.5rem;
+  font-style: italic;
+}
 
 .zone-hooks {
   flex: 1;

@@ -1,5 +1,7 @@
 import { snapPoint, hexToRgba } from "./draw-tools.js";
 
+import { loadCustomZonePresets } from "./zone-custom-presets.js";
+
 export const ZONE_PRESETS = [
   { id: "fw", name: "FWエリア", color: "#f59e0b", opacity: 0.3, desc: "フリーウェイト・ラック等の大枠" },
   { id: "studio", name: "スタジオエリア", color: "#8b5cf6", opacity: 0.3, desc: "スタジオ・レッスン系の区画" },
@@ -10,6 +12,10 @@ export const ZONE_PRESETS = [
   { id: "other", name: "その他区画", color: "#94a3b8", opacity: 0.25, desc: "上記以外・仮置き・検討中" },
 ];
 
+export function getAllZonePresets() {
+  return [...ZONE_PRESETS, ...loadCustomZonePresets()];
+}
+
 export const ZONE_SERIALIZE_PROPS = [
   "objectType",
   "zoneName",
@@ -17,6 +23,7 @@ export const ZONE_SERIALIZE_PROPS = [
   "zoneColor",
   "zoneOpacity",
   "zonePresetId",
+  "zoneInstanceId",
 ];
 
 export function getZoneStyle(color, opacity) {
@@ -87,6 +94,7 @@ export function createZoneGroup(points, preset, memo = "") {
     zoneColor: preset.color,
     zoneOpacity: preset.opacity,
     zonePresetId: preset.id,
+    zoneInstanceId: crypto.randomUUID(),
     hoverCursor: "pointer",
     subTargetCheck: false,
   });
@@ -119,6 +127,7 @@ export function updateZoneColors(group, color, opacity) {
 }
 
 export function upgradeZoneObject(obj) {
+  if (!obj.zoneInstanceId) obj.set("zoneInstanceId", crypto.randomUUID());
   if (obj.objectType === "fillArea") {
     obj.set({
       objectType: "zone",
