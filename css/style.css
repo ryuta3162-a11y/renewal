@@ -264,6 +264,39 @@ body {
 }
 .zone-tooltip strong { color: #fbbf24; display: block; margin-bottom: 0.2rem; }
 
+.modal-compact { max-width: 300px; }
+.modal-compact .modal-body { padding: 0.75rem 1rem 1rem; }
+.zone-action-memo {
+  font-size: 0.72rem;
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+  padding: 0.45rem 0.5rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  min-height: 2.5rem;
+}
+.zone-action-memo.empty { color: var(--muted); font-style: italic; }
+.zone-action-buttons {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.zone-delete-btn {
+  min-width: 5.5rem;
+  padding-left: 0.65rem;
+  padding-right: 0.65rem;
+}
+.zone-prop-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.modal-note { font-size: 0.7rem; color: var(--muted); line-height: 1.5; }
+
 .tools { border-left: 1px solid var(--border); border-right: 1px solid var(--border); padding: 0 0.6rem; }
 
 .tool-btn {

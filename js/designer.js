@@ -16,6 +16,7 @@ import {
   updateZoneLabel,
   updateZoneColors,
   upgradeZoneObject,
+  removeOrphanZonePreviews,
 } from "./zones.js";
 import { getInventoryParts, getCategoryOrder } from "./machine-inventory.js";
 import {
@@ -70,6 +71,7 @@ let zoneTapStart = null;
 let memoPendingPos = null;
 let editingMemo = null;
 let editingZone = null;
+let zoneActionTarget = null;
 let drawingImage = null;
 let autoSaveTimer = null;
 let lastSavedAt = null;
@@ -262,6 +264,8 @@ async function loadDrawing(id) {
   try {
     canvas.clear();
     drawingImage = null;
+    polygonCleanup = null;
+    removeOrphanZonePreviews(canvas);
     await loadSheetBackground(sheet);
     restoreDesign(pageKey());
     pushHistory(true);
@@ -406,6 +410,7 @@ function setupDrawStyle() {
 function setupZoneUI() {
   buildZoneHooks();
   setupZoneModal();
+  setupZoneActionModal();
 
   document.getElementById("btn-hooks-expand-all")?.addEventListener("click", () => {
     setAllHooksCollapsed(false);
@@ -559,7 +564,7 @@ function refreshZoneHooksList() {
       btn.addEventListener("click", () => {
         canvas.setActiveObject(zone);
         canvas.requestRenderAll();
-        openZoneModal(zone);
+        openZoneAction(zone);
       });
       li.appendChild(btn);
       list.appendChild(li);
@@ -606,14 +611,59 @@ function setupZoneModal() {
   });
 
   document.getElementById("zone-delete")?.addEventListener("click", () => {
-    if (editingZone) {
-      canvas.remove(editingZone);
-      editingZone = null;
-      document.getElementById("zone-modal").close();
-      pushHistory();
-      refreshZoneHooksList();
-    }
+    if (editingZone) deleteZone(editingZone);
   });
+}
+
+function setupZoneActionModal() {
+  document.getElementById("zone-action-edit")?.addEventListener("click", () => {
+    if (!zoneActionTarget) return;
+    document.getElementById("zone-action-modal").close();
+    openZoneModal(zoneActionTarget);
+  });
+
+  document.getElementById("zone-action-delete")?.addEventListener("click", () => {
+    if (zoneActionTarget) deleteZone(zoneActionTarget);
+  });
+
+  document.getElementById("zone-action-modal")?.addEventListener("close", () => {
+    zoneActionTarget = null;
+  });
+}
+
+function openZoneAction(zone) {
+  if (!zone) return;
+  zoneActionTarget = zone;
+  editingZone = null;
+  document.getElementById("zone-action-title").textContent = zone.zoneName || "区画";
+  const memoEl = document.getElementById("zone-action-memo");
+  const memo = zone.zoneMemo?.trim();
+  if (memo) {
+    memoEl.textContent = memo;
+    memoEl.classList.remove("empty");
+  } else {
+    memoEl.textContent = "メモはまだありません";
+    memoEl.classList.add("empty");
+  }
+  document.getElementById("zone-action-modal").showModal();
+}
+
+function deleteZone(zone) {
+  if (!zone) return;
+  const name = zone.zoneName || "区画";
+  if (!confirm(`「${name}」を削除しますか？`)) return;
+
+  canvas.remove(zone);
+  if (editingZone === zone) editingZone = null;
+  if (zoneActionTarget === zone) zoneActionTarget = null;
+  canvas.discardActiveObject();
+  document.getElementById("zone-action-modal")?.close();
+  document.getElementById("zone-modal")?.close();
+  pushHistory();
+  refreshZoneHooksList();
+  scheduleAutoSave();
+  updateProps();
+  flashStatus(`「${name}」を削除しました`);
 }
 
 function openZoneModal(zone) {
@@ -782,9 +832,26 @@ function highlightSelectedPart() {
   });
 }
 
+function cancelZoneDrawing() {
+  if (polygonCleanup) {
+    polygonCleanup();
+    polygonCleanup = null;
+  }
+  removeOrphanZonePreviews(canvas);
+  setTool("select");
+  flashStatus("区画描画をやめました（右クリック / Esc）");
+}
+
 // ── Canvas interaction ──────────────────────────────
 function onCanvasMouseDown(opt) {
   const e = opt.e;
+
+  if (activeTool === "zone" && e.button === 2) {
+    e.preventDefault();
+    cancelZoneDrawing();
+    return;
+  }
+
   if (activeTool === "line" || activeTool === "pen" || activeTool === "zone") return;
 
   if (e.button === 0 && activeTool === "select" && opt.target?.objectType === "zone") {
@@ -860,7 +927,8 @@ async function onCanvasMouseUp(opt) {
     const e = opt.e;
     const moved = Math.hypot(e.clientX - zoneTapStart.x, e.clientY - zoneTapStart.y);
     if (moved < 6 && opt.target?.objectType === "zone") {
-      openZoneModal(opt.target);
+      canvas.setActiveObject(opt.target);
+      openZoneAction(opt.target);
     }
     zoneTapStart = null;
   }
@@ -933,7 +1001,7 @@ function showZoneTooltip(e, zone) {
   const memo = zone.zoneMemo?.trim();
   zoneTooltip.innerHTML = memo
     ? `<strong>${esc(zone.zoneName || "区画")}</strong>${esc(memo)}`
-    : `<strong>${esc(zone.zoneName || "区画")}</strong><span style="color:var(--muted)">クリックでメモ</span>`;
+    : `<strong>${esc(zone.zoneName || "区画")}</strong><span style="color:var(--muted)">クリックで修正・削除</span>`;
   zoneTooltip.hidden = false;
   const wrap = canvasWrap.getBoundingClientRect();
   zoneTooltip.style.left = `${e.clientX - wrap.left + 12}px`;
@@ -1121,6 +1189,10 @@ function setTool(tool) {
       () => pendingZonePreset,
       (zone) => {
         polygonCleanup = null;
+        if (!zone) {
+          setTool("select");
+          return;
+        }
         pushHistory();
         applyInteractiveControls(zone);
         refreshZoneHooksList();
@@ -1128,7 +1200,7 @@ function setTool(tool) {
         setTool("select");
       }
     );
-    flashStatus(`「${pendingZonePreset.name}」— 角をクリック → 始点で閉じる / Enter確定 / Backspaceで戻す`);
+    flashStatus(`「${pendingZonePreset.name}」— 角クリックで囲む / 右クリック・Escでやめる`);
   } else if (tool === "place" && MACHINES_UI_ENABLED) {
     canvas.selection = false;
     canvas.skipTargetFind = false;
@@ -1341,10 +1413,14 @@ function updateProps() {
     content.innerHTML = `
       <p class="prop-type">区画</p>
       <p class="prop-meta">${esc(obj.zoneName || "区画")}</p>
-      ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : `<p class="prop-meta" style="color:var(--muted)">メモなし — タップで編集</p>`}
-      <button class="btn btn-ghost btn-block btn-sm" id="btn-edit-zone">メモを編集</button>
+      ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : `<p class="prop-meta" style="color:var(--muted)">メモなし</p>`}
+      <div class="zone-prop-actions">
+        <button class="btn btn-primary btn-sm" id="btn-edit-zone">✎ 修正</button>
+        <button class="btn btn-danger btn-sm zone-delete-btn" id="btn-delete-zone" title="削除">🗑</button>
+      </div>
     `;
     document.getElementById("btn-edit-zone")?.addEventListener("click", () => openZoneModal(obj));
+    document.getElementById("btn-delete-zone")?.addEventListener("click", () => deleteZone(obj));
     document.getElementById("prop-label").closest(".prop-field").hidden = false;
     document.querySelectorAll("#props-form .prop-row").forEach((row) => {
       row.hidden = true;

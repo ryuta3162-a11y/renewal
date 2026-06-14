@@ -126,8 +126,9 @@
           <ul>
             <li>左の<strong>区分フック</strong>を開いて区画を描く</li>
             <li><strong>⬡区画</strong>：角をクリックして線で囲む</li>
-            <li>始点をクリック / <strong>Enter</strong> で確定、<strong>Backspace</strong> で1点戻す</li>
-            <li>区画タップでメモ / フック内リストから再選択</li>
+            <li>始点クリック / <strong>Enter</strong> で確定、<strong>Backspace</strong> で1点戻す</li>
+            <li><strong>右クリック / Esc</strong> で描画中の区画をやめる</li>
+            <li>区画を<strong>クリック</strong> → 修正 or 削除を選択</li>
             <li>フック上部の<strong>展開・折畳</strong>で全体表示</li>
           </ul>
         </div>
@@ -161,7 +162,22 @@
     </form>
   </dialog>
 
-  <!-- 区画メモ -->
+  <!-- 区画タップ時：修正 or 削除 -->
+  <dialog id="zone-action-modal" class="modal modal-compact">
+    <header class="modal-header">
+      <h3 id="zone-action-title">区画</h3>
+      <button type="button" class="btn-close" data-close>×</button>
+    </header>
+    <div class="modal-body">
+      <p id="zone-action-memo" class="zone-action-memo"></p>
+      <div class="zone-action-buttons">
+        <button type="button" class="btn btn-primary" id="zone-action-edit">✎ 修正</button>
+        <button type="button" class="btn btn-danger zone-delete-btn" id="zone-action-delete" title="区画を削除">🗑 削除</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 区画メモ（修正用） -->
   <dialog id="zone-modal" class="modal">
     <form id="zone-form" method="dialog">
       <header class="modal-header">

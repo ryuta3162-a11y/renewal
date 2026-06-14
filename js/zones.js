@@ -166,6 +166,8 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
         strokeDashArray: [6, 4],
         selectable: false,
         evented: false,
+        _zonePreview: true,
+        _skipHistory: true,
       });
       canvas.add(rubberLine);
 
@@ -181,6 +183,8 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
             opacity: 0.85,
             selectable: false,
             evented: false,
+            _zonePreview: true,
+            _skipHistory: true,
           }
         );
         canvas.add(previewPoly);
@@ -189,6 +193,13 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
     }
 
     if (e.type !== "mouseup" && e.type !== "mousedown") return;
+
+    if (e.type === "mousedown" && e.button === 2) {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelDraw();
+      return;
+    }
 
     if (e.type === "mousedown" && e.button === 0) {
       if (points.length >= 3) {
@@ -212,6 +223,8 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
         originY: "center",
         selectable: false,
         evented: false,
+        _zonePreview: true,
+        _skipHistory: true,
       });
       vertexDots.push(dot);
       canvas.add(dot);
@@ -223,6 +236,8 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
           strokeWidth: 2,
           selectable: false,
           evented: false,
+          _zonePreview: true,
+          _skipHistory: true,
         });
         previewLines.push(line);
         canvas.add(line);
@@ -237,8 +252,8 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
       finish();
     }
     if (e.key === "Escape") {
-      cleanup();
-      onDone?.();
+      e.preventDefault();
+      cancelDraw();
     }
     if (e.key === "Backspace" && points.length) {
       e.preventDefault();
@@ -260,6 +275,11 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
       canvas.requestRenderAll();
     }
   };
+
+  function cancelDraw() {
+    cleanup();
+    onDone?.(null);
+  }
 
   function cleanup() {
     canvas.off("mouse:down", handler);
@@ -288,4 +308,12 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
   document.addEventListener("keydown", keyHandler);
 
   return cleanup;
+}
+
+/** 途中で残った区画プレビューを除去 */
+export function removeOrphanZonePreviews(canvas) {
+  canvas.getObjects()
+    .filter((o) => o._zonePreview)
+    .forEach((o) => canvas.remove(o));
+  canvas.requestRenderAll();
 }
