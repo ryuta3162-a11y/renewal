@@ -77,6 +77,7 @@ let autoSaveTimer = null;
 let lastSavedAt = null;
 const history = [];
 const historyLimit = 50;
+let isRestoringHistory = false;
 
 init();
 async function init() {
@@ -109,6 +110,7 @@ function initCanvas() {
   });
 
   canvas.on("object:modified", (e) => {
+    if (isRestoringHistory) return;
     if (e.target?.objectType === "part") {
       enforceMinPartSize(e.target);
       normalizePartAfterResize(e.target);
@@ -126,12 +128,13 @@ function initCanvas() {
       drawingImage.sendToBack();
     }
     if (e.target?.objectType === "zone") refreshZoneHooksList();
-    if (!e.target?._skipHistory) {
+    if (!isRestoringHistory && !e.target?._skipHistory) {
       pushHistory();
       scheduleAutoSave();
     }
   });
   canvas.on("object:removed", (e) => {
+    if (isRestoringHistory) return;
     if (e.target?.objectType === "zone") refreshZoneHooksList();
     pushHistory();
     scheduleAutoSave();
@@ -262,13 +265,14 @@ async function loadDrawing(id) {
   currentDrawingId = id;
   document.getElementById("drawing-select").value = id;
   try {
+    isRestoringHistory = true;
     canvas.clear();
     drawingImage = null;
     polygonCleanup = null;
-    removeOrphanZonePreviews(canvas);
     await loadSheetBackground(sheet);
-    restoreDesign(pageKey());
+    await restoreDesign(pageKey());
     pushHistory(true);
+    isRestoringHistory = false;
     applyMachinesVisibility();
     refreshZoneHooksList();
     const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
@@ -384,6 +388,7 @@ async function reloadPage() {
   const sheet = getCurrentSheet(currentDrawingId);
   if (!sheet) return;
   updatePageUI();
+  isRestoringHistory = true;
   getUserObjects().forEach((o) => canvas.remove(o));
   if (drawingImage) canvas.remove(drawingImage);
   drawingImage = null;
@@ -393,7 +398,9 @@ async function reloadPage() {
     const pdf = await pdfToDataUrl(sheet.file, currentPage, 2);
     await loadDrawingImage(pdf.dataUrl);
   }
-  restoreDesign(pageKey());
+  await restoreDesign(pageKey());
+  pushHistory(true);
+  isRestoringHistory = false;
   setStatus(`${sheet.name} — ページ ${currentPage}`);
 }
 
@@ -1497,15 +1504,32 @@ function pushHistory(reset = false) {
 }
 
 function undo() {
-  if (history.length < 2) return;
+  if (history.length < 2) {
+    flashStatus("これ以上戻せません");
+    return;
+  }
+  isRestoringHistory = true;
   history.pop();
   getUserObjects().forEach((o) => canvas.remove(o));
   const objs = JSON.parse(history[history.length - 1]);
   fabric.util.enlivenObjects(objs, (restored) => {
-    restored.forEach((o) => canvas.add(o));
+    restored.forEach((o) => {
+      if (o.objectType === "fillArea" || o.objectType === "zone") {
+        upgradeZoneObject(o);
+        applyInteractiveControls(o);
+      } else {
+        upgradePartGroup(o);
+      }
+      canvas.add(o);
+    });
     if (drawingImage) drawingImage.sendToBack();
     canvas.requestRenderAll();
+    applyMachinesVisibility();
+    refreshZoneHooksList();
+    isRestoringHistory = false;
     updateProps();
+    persistCurrent();
+    flashStatus("1つ戻しました");
   });
 }
 
@@ -1539,27 +1563,37 @@ function persistCurrent() {
 }
 
 function restoreDesign(key) {
-  const data = loadDesign(key);
-  if (!data) return;
-  if (data.viewport?.length === 6) {
-    canvas.setViewportTransform(data.viewport);
-  }
-  if (!data.objects?.length) return;
-  fabric.util.enlivenObjects(data.objects, (objs) => {
-    objs.forEach((o) => {
-      if (o.objectType === "fillArea" || o.objectType === "zone") {
-        upgradeZoneObject(o);
-        applyInteractiveControls(o);
-      } else {
-        upgradePartGroup(o);
-      }
-      canvas.add(o);
+  return new Promise((resolve) => {
+    const data = loadDesign(key);
+    if (!data) {
+      resolve();
+      return;
+    }
+    if (data.viewport?.length === 6) {
+      canvas.setViewportTransform(data.viewport);
+    }
+    if (!data.objects?.length) {
+      resolve();
+      return;
+    }
+    isRestoringHistory = true;
+    fabric.util.enlivenObjects(data.objects, (objs) => {
+      objs.forEach((o) => {
+        if (o.objectType === "fillArea" || o.objectType === "zone") {
+          upgradeZoneObject(o);
+          applyInteractiveControls(o);
+        } else {
+          upgradePartGroup(o);
+        }
+        canvas.add(o);
+      });
+      if (drawingImage) drawingImage.sendToBack();
+      canvas.requestRenderAll();
+      applyMachinesVisibility();
+      refreshZoneHooksList();
+      isRestoringHistory = false;
+      resolve();
     });
-    if (drawingImage) drawingImage.sendToBack();
-    canvas.requestRenderAll();
-    applyMachinesVisibility();
-    refreshZoneHooksList();
-    scheduleAutoSave();
   });
 }
 
