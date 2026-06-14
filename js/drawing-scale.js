@@ -105,6 +105,46 @@ export function computeZoneMetrics(zone, drawingImage, mmPerImagePx) {
   };
 }
 
+/** 区画の各辺の実長（m）とラベル配置用情報 */
+export function computeZoneEdgeLengths(zone, drawingImage, mmPerImagePx) {
+  const pts = getZoneCanvasPoints(zone);
+  if (pts.length < 2) return [];
+
+  let cx = 0;
+  let cy = 0;
+  pts.forEach((p) => {
+    cx += p.x;
+    cy += p.y;
+  });
+  cx /= pts.length;
+  cy /= pts.length;
+
+  const edges = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const metrics = segmentMetrics(a, b, drawingImage, mmPerImagePx);
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    let nx = -dy / len;
+    let ny = dx / len;
+    if (nx * (cx - mx) + ny * (cy - my) > 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    edges.push({
+      lengthM: metrics?.lengthM ?? null,
+      midCanvas: { x: mx, y: my },
+      outwardCanvas: { x: nx, y: ny },
+      angleDeg: (Math.atan2(dy, dx) * 180) / Math.PI,
+    });
+  }
+  return edges;
+}
+
 export function segmentMetrics(canvasA, canvasB, drawingImage, mmPerImagePx) {
   if (!mmPerImagePx || !drawingImage) return null;
   const ia = canvasToImagePx(canvasA, drawingImage);
@@ -118,6 +158,11 @@ export function segmentMetrics(canvasA, canvasB, drawingImage, mmPerImagePx) {
     widthM: dxMm / 1000,
     depthM: dyMm / 1000,
   };
+}
+
+export function formatEdgeLength(metrics) {
+  if (!metrics || metrics.lengthM == null) return "縮尺未設定";
+  return `${metrics.lengthM.toFixed(2)}m`;
 }
 
 export function formatSegmentDimsAlways(metrics) {

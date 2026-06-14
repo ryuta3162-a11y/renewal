@@ -1,5 +1,8 @@
 import { snapPoint, hexToRgba } from "./draw-tools.js";
-import { formatZoneSizeText, formatSegmentDimsAlways } from "./drawing-scale.js";
+import {
+  formatZoneSizeText,
+  formatEdgeLength,
+} from "./drawing-scale.js";
 
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
 
@@ -10,7 +13,6 @@ export const ZONE_PRESETS = [
   { id: "stretch", name: "ストレッチエリア", color: "#14b8a6", opacity: 0.28, desc: "ストレッチ・ヨガ系スペース" },
   { id: "entrance", name: "エントランス", color: "#3b82f6", opacity: 0.25, desc: "入口・受付・動線の起点" },
   { id: "locker", name: "更衣室・水回り", color: "#06b6d4", opacity: 0.28, desc: "更衣室・シャワー・トイレ周辺" },
-  { id: "online-lesson", name: "⑩ オンラインレッスンについて", color: "#e11d48", opacity: 0.22, desc: "JOYFIT Online Lesson の導線・店舗との関係", hasGuide: true },
   { id: "other", name: "その他区画", color: "#94a3b8", opacity: 0.25, desc: "上記以外・仮置き・検討中" },
 ];
 
@@ -63,66 +65,103 @@ function localBBoxFromPolyPoints(points) {
 
 function createDimMarker(kind) {
   return new fabric.Text("", {
-    fontSize: 11,
-    fill: "#1e40af",
+    fontSize: 10,
+    fill: "#1e3a8a",
     fontWeight: "600",
-    backgroundColor: "rgba(255,255,255,0.88)",
+    backgroundColor: "rgba(255,255,255,0.92)",
     _zoneDim: kind,
     objectCaching: false,
     selectable: false,
     evented: false,
+    originX: "center",
+    originY: "center",
   });
 }
 
-export function updateZoneDimensions(group, metrics) {
-  const poly = group._objects?.[0];
-  if (!poly?.points) return;
-  const dimW = group._objects?.find((o) => o._zoneDim === "width");
-  const dimD = group._objects?.find((o) => o._zoneDim === "depth");
-  if (!dimW || !dimD) return;
+function hideLegacyBBoxDims(group) {
+  group._objects?.forEach((o) => {
+    if (o._zoneDim === "width" || o._zoneDim === "depth") {
+      o.set({ text: "", visible: false });
+    }
+  });
+}
 
-  if (!metrics) {
-    dimW.set({ text: "", visible: false });
-    dimD.set({ text: "", visible: false });
+function syncEdgeDimMarkers(group, count) {
+  let markers = group._objects?.filter((o) => o._zoneDim === "edge") ?? [];
+  while (markers.length < count) {
+    const marker = createDimMarker("edge");
+    group.add(marker);
+    markers.push(marker);
+  }
+  while (markers.length > count) {
+    const rem = markers.pop();
+    group.remove(rem);
+  }
+  return group._objects.filter((o) => o._zoneDim === "edge");
+}
+
+function canvasPointToGroupLocal(group, pt) {
+  const inv = fabric.util.invertTransform(group.calcTransformMatrix());
+  return fabric.util.transformPoint(new fabric.Point(pt.x, pt.y), inv);
+}
+
+export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx) {
+  const poly = group._objects?.[0];
+  if (!poly?.points?.length) return;
+
+  hideLegacyBBoxDims(group);
+
+  if (!mmPerImagePx || !drawingImage) {
+    group._objects?.forEach((o) => {
+      if (o._zoneDim === "edge") o.set({ text: "", visible: false });
+    });
     group.dirty = true;
     return;
   }
 
-  const bbox = localBBoxFromPolyPoints(poly.points);
-  const pad = 14;
+  const edges = computeZoneEdgeLengths(group, drawingImage, mmPerImagePx);
+  const markers = syncEdgeDimMarkers(group, edges.length);
+  const groupAngle = group.angle || 0;
+  const outwardPad = 11;
 
-  dimW.set({
-    text: `横 ${metrics.widthM.toFixed(1)}m`,
-    left: (bbox.minX + bbox.maxX) / 2,
-    top: bbox.maxY + pad,
-    originX: "center",
-    originY: "top",
-    visible: true,
-  });
-  dimD.set({
-    text: `縦 ${metrics.depthM.toFixed(1)}m`,
-    left: bbox.minX - pad,
-    top: (bbox.minY + bbox.maxY) / 2,
-    originX: "right",
-    originY: "center",
-    angle: -90,
-    visible: true,
+  edges.forEach((edge, i) => {
+    const marker = markers[i];
+    if (!marker) return;
+
+    const outward = {
+      x: edge.midCanvas.x + edge.outwardCanvas.x * outwardPad,
+      y: edge.midCanvas.y + edge.outwardCanvas.y * outwardPad,
+    };
+    const local = canvasPointToGroupLocal(group, outward);
+
+    marker.set({
+      text: edge.lengthM != null ? `${edge.lengthM.toFixed(2)}m` : "",
+      left: local.x,
+      top: local.y,
+      angle: edge.angleDeg - groupAngle,
+      visible: edge.lengthM != null,
+    });
   });
   group.dirty = true;
+}
+
+export function updateZoneDimensions(group, metrics, drawingImage, mmPerImagePx) {
+  updateZoneEdgeLengths(group, drawingImage, mmPerImagePx);
 }
 
 export function ensureZoneDimensionMarkers(group) {
   if (group.objectType !== "zone" || group.type !== "group") return group;
-  if (group._objects?.some((o) => o._zoneDim)) return group;
-  group.add(createDimMarker("width"));
-  group.add(createDimMarker("depth"));
+  const pts = getZoneCanvasPoints(group);
+  const edgeCount = Math.max(pts.length, 3);
+  syncEdgeDimMarkers(group, edgeCount);
+  hideLegacyBBoxDims(group);
   group.dirty = true;
   return group;
 }
 
-export function refreshZoneDisplay(group, metrics) {
+export function refreshZoneDisplay(group, metrics, drawingImage, mmPerImagePx) {
   updateZoneLabel(group, metrics);
-  updateZoneDimensions(group, metrics);
+  updateZoneEdgeLengths(group, drawingImage, mmPerImagePx);
 }
 
 function buildZoneLabelText(name, metrics) {
@@ -141,7 +180,7 @@ function fitZoneLabel(name, metrics, maxW) {
       lineHeight: 1.12,
       splitByGrapheme: true,
     });
-    if (tb.calcTextHeight() <= 64) return fs;
+    if (tb.calcTextHeight() <= 88) return fs;
   }
   return 7;
 }
@@ -177,10 +216,12 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
     objectCaching: false,
   });
 
-  const dimW = createDimMarker("width");
-  const dimD = createDimMarker("depth");
+  const dimMarkers = [];
+  for (let i = 0; i < points.length; i++) {
+    dimMarkers.push(createDimMarker("edge"));
+  }
 
-  const group = new fabric.Group([poly, label, dimW, dimD], {
+  const group = new fabric.Group([poly, label, ...dimMarkers], {
     left: c.x,
     top: c.y,
     originX: "center",
@@ -197,7 +238,7 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
   });
 
   group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
-  updateZoneDimensions(group, metrics);
+  if (metrics) group._zoneMetrics = metrics;
   return group;
 }
 
@@ -284,7 +325,7 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
   function updateLiveDim(a, b) {
     const metrics = getSegmentMetrics?.(a, b) ?? null;
     onDimPreview?.(metrics);
-    const text = formatSegmentDimsAlways(metrics);
+    const text = formatEdgeLength(metrics);
     const mx = (a.x + b.x) / 2;
     const my = (a.y + b.y) / 2;
     if (!liveDimLabel) {
@@ -395,7 +436,7 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
         previewLines.push(line);
         canvas.add(line);
 
-        const segLabel = makeSegmentDimLabel(prev, ptr, formatSegmentDimsAlways(getSegmentMetrics?.(prev, ptr)));
+        const segLabel = makeSegmentDimLabel(prev, ptr, formatEdgeLength(getSegmentMetrics?.(prev, ptr)));
         segmentDimLabels.push(segLabel);
         canvas.add(segLabel);
       }

@@ -45,6 +45,7 @@ import {
   formatZoneSizeShort,
   formatScaleStatus,
   formatSegmentDimsAlways,
+  formatEdgeLength,
 } from "./drawing-scale.js";
 import {
   captureDrawingState,
@@ -52,7 +53,6 @@ import {
   syncUserObjectsToDrawing,
   configureDrawingResize,
 } from "./drawing-transform.js";
-import { openOnlineLessonModal } from "./online-lesson.js";
 import { saveDesign, loadDesign } from "./storage.js";
 import {
   loadCustomParts,
@@ -152,7 +152,7 @@ function initCanvas() {
       normalizePartAfterResize(e.target);
     }
     if (e.target?.objectType === "zone") {
-      refreshZoneDisplay(e.target, computeZoneMetricsFor(e.target));
+      refreshZoneOnCanvas(e.target, computeZoneMetricsFor(e.target));
       refreshZoneHooksList();
     }
     if (e.target) applyInteractiveControls(e.target);
@@ -520,6 +520,10 @@ function setupZoneUI() {
   });
 }
 
+function refreshZoneOnCanvas(zone, metrics) {
+  refreshZoneDisplay(zone, metrics, drawingImage, currentMmPerImagePx);
+}
+
 function computeZoneMetricsFor(zone) {
   return computeZoneMetrics(zone, drawingImage, currentMmPerImagePx);
 }
@@ -527,7 +531,7 @@ function computeZoneMetricsFor(zone) {
 function refreshAllZoneMetrics() {
   getZonesOnCanvas().forEach((zone) => {
     ensureZoneDimensionMarkers(zone);
-    refreshZoneDisplay(zone, computeZoneMetricsFor(zone));
+    refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
   });
   canvas?.requestRenderAll();
 }
@@ -538,7 +542,7 @@ function showDrawDimHud(metrics) {
     drawDimHud.hidden = true;
     return;
   }
-  drawDimHud.textContent = formatSegmentDimsAlways(metrics);
+  drawDimHud.textContent = formatEdgeLength(metrics);
   drawDimHud.hidden = false;
 }
 
@@ -728,10 +732,6 @@ function createZoneHookElement(preset, collapsed, isCustom) {
        <button type="button" class="zone-hook-del" title="区分を削除">×</button>`
     : "";
 
-  const guideBtn = preset.hasGuide
-    ? `<button type="button" class="btn btn-ghost btn-sm btn-block btn-online-lesson-guide">📱 利用の流れ（5画面）</button>`
-    : "";
-
   hook.innerHTML = `
     <button type="button" class="zone-hook-header" aria-expanded="${!collapsed[preset.id]}">
       <span class="zone-hook-bar" style="background:${preset.color}"></span>
@@ -742,7 +742,6 @@ function createZoneHookElement(preset, collapsed, isCustom) {
     </button>
     <div class="zone-hook-body">
       <p class="zone-hook-desc">${esc(preset.desc || "")}</p>
-      ${guideBtn}
       <button type="button" class="btn btn-primary btn-sm btn-block btn-draw-zone">区画を描く</button>
       <ul class="zone-hook-list" data-list-for="${preset.id}"></ul>
     </div>
@@ -750,7 +749,7 @@ function createZoneHookElement(preset, collapsed, isCustom) {
 
   const header = hook.querySelector(".zone-hook-header");
   header.addEventListener("click", (e) => {
-    if (e.target.closest(".btn-draw-zone, .zone-hook-edit, .zone-hook-del, .btn-online-lesson-guide")) return;
+    if (e.target.closest(".btn-draw-zone, .zone-hook-edit, .zone-hook-del")) return;
     const isCollapsed = hook.classList.toggle("collapsed");
     header.setAttribute("aria-expanded", String(!isCollapsed));
     const state = loadHookCollapsedState();
@@ -767,11 +766,6 @@ function createZoneHookElement(preset, collapsed, isCustom) {
     state[preset.id] = false;
     saveHookCollapsedState(state);
     selectZonePreset(preset, true);
-  });
-
-  hook.querySelector(".btn-online-lesson-guide")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    openOnlineLessonModal();
   });
 
   hook.querySelector(".zone-hook-edit")?.addEventListener("click", (e) => {
@@ -956,7 +950,7 @@ function setupZoneModal() {
 
     if (editingZone) {
       editingZone.set({ zoneName: name, zoneMemo: memo });
-      refreshZoneDisplay(editingZone, computeZoneMetricsFor(editingZone));
+      refreshZoneOnCanvas(editingZone, computeZoneMetricsFor(editingZone));
       canvas.requestRenderAll();
     }
     document.getElementById("zone-modal").close();
@@ -1555,6 +1549,8 @@ function setTool(tool) {
         }
         pushHistory();
         applyInteractiveControls(zone);
+        ensureZoneDimensionMarkers(zone);
+        refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
         refreshZoneHooksList();
         openZoneModal(zone);
         setTool("select");
@@ -1621,7 +1617,7 @@ function enableShapeDraw(kind) {
       shape.set({ x2: ptr.x, y2: ptr.y });
       const metrics = segmentMetrics(start, ptr, drawingImage, currentMmPerImagePx);
       showDrawDimHud(metrics);
-      const text = formatSegmentDimsAlways(metrics);
+      const text = formatEdgeLength(metrics);
       const mx = (start.x + ptr.x) / 2;
       const my = (start.y + ptr.y) / 2;
       if (!liveDimLabel) {
@@ -1659,7 +1655,7 @@ function enableShapeDraw(kind) {
         stroke: "#ef4444",
         strokeWidth: 2,
       });
-      const label = new fabric.Text(formatSegmentDimsAlways(metrics), {
+      const label = new fabric.Text(formatEdgeLength(metrics), {
         left: 0,
         top: -10,
         fontSize: 11,
@@ -1982,6 +1978,7 @@ function undo() {
     canvas.requestRenderAll();
     applyMachinesVisibility();
     refreshZoneHooksList();
+    refreshAllZoneMetrics();
     isRestoringHistory = false;
     updateProps();
     persistCurrent();
