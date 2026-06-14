@@ -20,7 +20,6 @@ import {
   removeOrphanZonePreviews,
   refreshZoneDisplay,
   ensureZoneDimensionMarkers,
-  updateZonePointsInPlace,
 } from "./zones.js";
 import {
   showZoneVertexHandles,
@@ -468,7 +467,9 @@ function applySavedDrawingTransform(t) {
 }
 
 function getUserObjects() {
-  return canvas.getObjects().filter((o) => o.objectType !== "drawing");
+  return canvas.getObjects().filter(
+    (o) => o.objectType !== "drawing" && o.objectType !== "zoneVertex" && !o._zonePreview
+  );
 }
 
 function snapshotUserObjects() {
@@ -1928,18 +1929,6 @@ function updateProps() {
       <p class="prop-meta">${esc(obj.partCategory || "")}</p>
       ${countLine}
     `;
-    form.hidden = false;
-    document.getElementById("prop-label").value = obj.partLabel || "";
-    document.getElementById("prop-width").value = Math.round(obj.getScaledWidth());
-    document.getElementById("prop-height").value = Math.round(obj.getScaledHeight());
-    document.getElementById("prop-mm-w").value = obj.realWidthMm || "";
-    document.getElementById("prop-mm-h").value = obj.realHeightMm || "";
-    const rect = getPartBodyRect(obj);
-    document.getElementById("prop-fill").value = rgbToHex(rect?.fill) || "#dbeafe";
-    document.getElementById("prop-stroke").value = rgbToHex(rect?.stroke) || "#2563eb";
-    document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
-    document.getElementById("prop-rotation-val").textContent = `${Math.round(obj.angle || 0)}°`;
-    document.getElementById("prop-use-image").checked = !!obj.partImageMode;
     showMachinePreview({
       label: obj.partLabel,
       category: obj.partCategory,
@@ -1951,7 +1940,7 @@ function updateProps() {
   }
 
   if (obj.objectType === "part") {
-    form.hidden = true;
+    if (btnDelete) btnDelete.hidden = false;
     content.innerHTML = `
       <p class="prop-type">配置オブジェクト</p>
       <p class="prop-meta">${esc(obj.partLabel || "パーツ")}</p>
@@ -1960,7 +1949,7 @@ function updateProps() {
     return;
   }
 
-  form.hidden = true;
+  if (btnDelete) btnDelete.hidden = false;
   content.innerHTML = `
     <p class="prop-type">${obj.type}</p>
     <p class="prop-meta">${Math.round(obj.getScaledWidth())} × ${Math.round(obj.getScaledHeight())} px</p>
