@@ -10,6 +10,7 @@ export const ZONE_PRESETS = [
   { id: "stretch", name: "ストレッチエリア", color: "#14b8a6", opacity: 0.28, desc: "ストレッチ・ヨガ系スペース" },
   { id: "entrance", name: "エントランス", color: "#3b82f6", opacity: 0.25, desc: "入口・受付・動線の起点" },
   { id: "locker", name: "更衣室・水回り", color: "#06b6d4", opacity: 0.28, desc: "更衣室・シャワー・トイレ周辺" },
+  { id: "online-lesson", name: "⑩ オンラインレッスンについて", color: "#e11d48", opacity: 0.22, desc: "JOYFIT Online Lesson の導線・店舗との関係", hasGuide: true },
   { id: "other", name: "その他区画", color: "#94a3b8", opacity: 0.25, desc: "上記以外・仮置き・検討中" },
 ];
 

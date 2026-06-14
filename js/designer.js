@@ -52,6 +52,7 @@ import {
   syncUserObjectsToDrawing,
   configureDrawingResize,
 } from "./drawing-transform.js";
+import { openOnlineLessonModal } from "./online-lesson.js";
 import { saveDesign, loadDesign } from "./storage.js";
 import {
   loadCustomParts,
@@ -727,6 +728,10 @@ function createZoneHookElement(preset, collapsed, isCustom) {
        <button type="button" class="zone-hook-del" title="区分を削除">×</button>`
     : "";
 
+  const guideBtn = preset.hasGuide
+    ? `<button type="button" class="btn btn-ghost btn-sm btn-block btn-online-lesson-guide">📱 利用の流れ（4画面）</button>`
+    : "";
+
   hook.innerHTML = `
     <button type="button" class="zone-hook-header" aria-expanded="${!collapsed[preset.id]}">
       <span class="zone-hook-bar" style="background:${preset.color}"></span>
@@ -737,6 +742,7 @@ function createZoneHookElement(preset, collapsed, isCustom) {
     </button>
     <div class="zone-hook-body">
       <p class="zone-hook-desc">${esc(preset.desc || "")}</p>
+      ${guideBtn}
       <button type="button" class="btn btn-primary btn-sm btn-block btn-draw-zone">区画を描く</button>
       <ul class="zone-hook-list" data-list-for="${preset.id}"></ul>
     </div>
@@ -744,7 +750,7 @@ function createZoneHookElement(preset, collapsed, isCustom) {
 
   const header = hook.querySelector(".zone-hook-header");
   header.addEventListener("click", (e) => {
-    if (e.target.closest(".btn-draw-zone, .zone-hook-edit, .zone-hook-del")) return;
+    if (e.target.closest(".btn-draw-zone, .zone-hook-edit, .zone-hook-del, .btn-online-lesson-guide")) return;
     const isCollapsed = hook.classList.toggle("collapsed");
     header.setAttribute("aria-expanded", String(!isCollapsed));
     const state = loadHookCollapsedState();
@@ -761,6 +767,11 @@ function createZoneHookElement(preset, collapsed, isCustom) {
     state[preset.id] = false;
     saveHookCollapsedState(state);
     selectZonePreset(preset, true);
+  });
+
+  hook.querySelector(".btn-online-lesson-guide")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openOnlineLessonModal();
   });
 
   hook.querySelector(".zone-hook-edit")?.addEventListener("click", (e) => {
