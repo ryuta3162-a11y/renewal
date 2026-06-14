@@ -46,6 +46,12 @@ import {
   formatScaleStatus,
   formatSegmentDimsAlways,
 } from "./drawing-scale.js";
+import {
+  captureDrawingState,
+  applyDrawingTransform,
+  syncUserObjectsToDrawing,
+  configureDrawingResize,
+} from "./drawing-transform.js";
 import { saveDesign, loadDesign } from "./storage.js";
 import {
   loadCustomParts,
@@ -95,6 +101,7 @@ let editingZone = null;
 let zoneActionTarget = null;
 let editingCustomPresetId = null;
 let drawingImage = null;
+let drawingTransformBefore = null;
 let currentMmPerImagePx = null;
 let scaleCalibCleanup = null;
 let autoSaveTimer = null;
@@ -135,6 +142,10 @@ function initCanvas() {
 
   canvas.on("object:modified", (e) => {
     if (isRestoringHistory) return;
+    if (e.target?.objectType === "drawing") {
+      onDrawingTransformEnd();
+      return;
+    }
     if (e.target?.objectType === "part") {
       enforceMinPartSize(e.target);
       normalizePartAfterResize(e.target);
@@ -165,8 +176,16 @@ function initCanvas() {
     scheduleAutoSave();
   });
   canvas.on("object:scaling", (e) => {
+    if (e.target?.objectType === "drawing" && !drawingTransformBefore) {
+      drawingTransformBefore = captureDrawingState(drawingImage);
+    }
     if (e.target) applyInteractiveControls(e.target);
     updatePropsLive();
+  });
+  canvas.on("before:transform", (e) => {
+    if (e.transform?.target?.objectType === "drawing" && !drawingTransformBefore) {
+      drawingTransformBefore = captureDrawingState(drawingImage);
+    }
   });
   canvas.on("object:moving", updatePropsLive);
   canvas.on("object:rotating", updatePropsLive);
@@ -328,20 +347,14 @@ function loadDrawingImage(dataUrl) {
         }
         img.set({
           objectType: "drawing",
-          selectable: false,
-          evented: true,
-          hoverCursor: "grab",
-          moveCursor: "grabbing",
-          hasControls: false,
-          hasBorders: false,
-          lockRotation: true,
-          lockScaling: true,
-          lockMovement: true,
+          originX: "left",
+          originY: "top",
+          objectCaching: false,
         });
         drawingImage = img;
         canvas.add(img);
         img.sendToBack();
-        fitDrawing(true);
+        configureDrawingResize(img, activeTool === "select");
         resolve(img);
       },
       { crossOrigin: "anonymous" }
@@ -351,6 +364,7 @@ function loadDrawingImage(dataUrl) {
 
 function fitDrawing(resetView = false) {
   if (!drawingImage) return;
+  const before = captureDrawingState(drawingImage);
   const pad = 32;
   const iw = drawingImage.width;
   const ih = drawingImage.height;
@@ -364,8 +378,39 @@ function fitDrawing(resetView = false) {
     left: (canvas.getWidth() - iw * scale) / 2,
     top: (canvas.getHeight() - ih * scale) / 2,
   });
+  drawingImage.setCoords();
+  const after = captureDrawingState(drawingImage);
+  if (getUserObjects().length) {
+    syncUserObjectsToDrawing(canvas, getUserObjects, before, after);
+    refreshAllZoneMetrics();
+  }
   if (resetView) canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
   canvas.requestRenderAll();
+}
+
+function updateDrawingInteractivity() {
+  configureDrawingResize(drawingImage, activeTool === "select");
+  canvas?.requestRenderAll();
+}
+
+function onDrawingTransformEnd() {
+  if (!drawingImage || !drawingTransformBefore) return;
+  const after = captureDrawingState(drawingImage);
+  syncUserObjectsToDrawing(canvas, getUserObjects, drawingTransformBefore, after);
+  drawingTransformBefore = null;
+  refreshAllZoneMetrics();
+  refreshZoneHooksList();
+  pushHistory();
+  updateProps();
+  scheduleAutoSave();
+  canvas.requestRenderAll();
+}
+
+function applySavedDrawingTransform(t) {
+  if (!drawingImage || !t) return false;
+  applyDrawingTransform(drawingImage, t);
+  configureDrawingResize(drawingImage, activeTool === "select");
+  return true;
 }
 
 function getUserObjects() {
@@ -384,7 +429,8 @@ function shouldStartPan(opt) {
   if (spaceDown && e.button === 0) return true;
   if (activeTool === "select" && e.button === 0) {
     const t = opt.target;
-    if (!t || t.objectType === "drawing") return true;
+    if (!t) return true;
+    if (t.objectType === "drawing") return false;
   }
   return false;
 }
@@ -1516,6 +1562,7 @@ function setTool(tool) {
     canvas.skipTargetFind = false;
   }
   updateCanvasCursor();
+  updateDrawingInteractivity();
 }
 
 function updateCanvasCursor() {
@@ -1746,6 +1793,10 @@ function enforceMinPartSize(obj) {
 function updatePropsLive() {
   const obj = canvas.getActiveObject();
   if (!obj) return;
+  if (obj.objectType === "drawing") {
+    updateProps();
+    return;
+  }
   document.getElementById("prop-width").value = Math.round(obj.getScaledWidth());
   document.getElementById("prop-height").value = Math.round(obj.getScaledHeight());
   document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
@@ -1761,6 +1812,28 @@ function updateProps() {
     content.innerHTML = `<p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>`;
     form.hidden = true;
     if (MACHINES_UI_ENABLED && pendingPart) showMachinePreview(pendingPart);
+    return;
+  }
+
+  if (obj.objectType === "drawing") {
+    form.hidden = true;
+    const pct = Math.round((obj.scaleX || 1) * 100);
+    const w = Math.round(obj.getScaledWidth());
+    const h = Math.round(obj.getScaledHeight());
+    content.innerHTML = `
+      <p class="prop-type">図面</p>
+      <p class="prop-meta">表示倍率: <strong>${pct}%</strong></p>
+      <p class="prop-meta">表示サイズ: ${w} × ${h} px</p>
+      <p class="prop-meta" style="color:var(--muted);line-height:1.5">四隅をドラッグで拡大縮小。区画・測定線・㎡表示も自動で連動します。</p>
+      <button class="btn btn-ghost btn-block btn-sm" id="btn-fit-drawing">全体にフィット</button>
+    `;
+    document.getElementById("btn-fit-drawing")?.addEventListener("click", () => {
+      fitDrawing(true);
+      pushHistory();
+      scheduleAutoSave();
+      updateProps();
+      flashStatus("図面を全体表示に戻しました");
+    });
     return;
   }
 
@@ -1932,6 +2005,14 @@ function persistCurrent() {
     objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
     viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
     mmPerImagePx: currentMmPerImagePx,
+    drawingTransform: drawingImage
+      ? {
+          left: drawingImage.left,
+          top: drawingImage.top,
+          scaleX: drawingImage.scaleX,
+          scaleY: drawingImage.scaleY,
+        }
+      : null,
   });
 }
 
@@ -1939,6 +2020,15 @@ function restoreDesign(key) {
   return new Promise((resolve) => {
     const data = loadDesign(key);
     currentMmPerImagePx = data?.mmPerImagePx ?? null;
+
+    if (drawingImage) {
+      if (data?.drawingTransform) {
+        applySavedDrawingTransform(data.drawingTransform);
+      } else {
+        fitDrawing(false);
+      }
+    }
+
     if (!data) {
       resolve();
       return;
