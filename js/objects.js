@@ -10,6 +10,11 @@ const SERIALIZE_PROPS = [
   "partImageMode",
   "imageUrl",
   "imageHasLabel",
+  "zoneName",
+  "zoneMemo",
+  "zoneColor",
+  "zoneOpacity",
+  "zonePresetId",
 ];
 
 const LABEL_PAD = 5;

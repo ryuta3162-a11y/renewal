@@ -1,4 +1,4 @@
-import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID } from "./constants.js";
+import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED } from "./constants.js";
 import {
   refreshProjects,
   setCachedProjects,
@@ -7,11 +7,16 @@ import {
   addImportedProposal,
 } from "./projects.js";
 import {
-  enablePolygonFill,
-  getFillStyle,
   snapPoint,
   setSnapEnabled,
 } from "./draw-tools.js";
+import {
+  ZONE_PRESETS,
+  enableZoneDraw,
+  updateZoneLabel,
+  updateZoneColors,
+  upgradeZoneObject,
+} from "./zones.js";
 import { getInventoryParts, getCategoryOrder } from "./machine-inventory.js";
 import {
   loadMachineManifest,
@@ -44,6 +49,7 @@ import {
 const canvasWrap = document.getElementById("canvas-wrap");
 const statusEl = document.getElementById("status");
 const memoTooltip = document.getElementById("memo-tooltip");
+const zoneTooltip = document.getElementById("zone-tooltip");
 
 let canvas;
 let currentProjectId = MASTER_PROJECT_ID;
@@ -52,15 +58,18 @@ let currentDrawingId = null;
 let currentPage = 1;
 let totalPages = 1;
 let polygonCleanup = null;
-let activeTool = "select";
+let activeTool = "zone";
+let pendingZonePreset = ZONE_PRESETS[0];
 let pendingPart = null;
 let isPanning = false;
 let spaceDown = false;
 let lastPan = null;
 let placeStart = null;
 let placePreview = null;
+let zoneTapStart = null;
 let memoPendingPos = null;
 let editingMemo = null;
+let editingZone = null;
 let drawingImage = null;
 let autoSaveTimer = null;
 let lastSavedAt = null;
@@ -71,7 +80,7 @@ init();
 async function init() {
   applyProControls();
   initCanvas();
-  await loadMachineManifest();
+  if (MACHINES_UI_ENABLED) await loadMachineManifest();
   const projects = await refreshProjects();
   setCachedProjects(projects);
   buildProjectSelect();
@@ -81,9 +90,11 @@ async function init() {
   setupProposalModal();
   setupPropsForm();
   setupDrawStyle();
+  setupZoneUI();
   setupKeyboard();
-  await rebuildPalette();
+  if (MACHINES_UI_ENABLED) await rebuildPalette();
   await loadDrawing(currentSheets[0].id);
+  setTool("zone");
 }
 
 function initCanvas() {
@@ -100,6 +111,9 @@ function initCanvas() {
       enforceMinPartSize(e.target);
       normalizePartAfterResize(e.target);
     }
+    if (e.target?.objectType === "zone") {
+      updateZoneLabel(e.target);
+    }
     if (e.target) applyInteractiveControls(e.target);
     pushHistory();
     updateProps();
@@ -109,12 +123,14 @@ function initCanvas() {
     if (drawingImage && e.target && e.target !== drawingImage) {
       drawingImage.sendToBack();
     }
+    if (e.target?.objectType === "zone") refreshZoneHooksList();
     if (!e.target?._skipHistory) {
       pushHistory();
       scheduleAutoSave();
     }
   });
-  canvas.on("object:removed", () => {
+  canvas.on("object:removed", (e) => {
+    if (e.target?.objectType === "zone") refreshZoneHooksList();
     pushHistory();
     scheduleAutoSave();
   });
@@ -249,6 +265,8 @@ async function loadDrawing(id) {
     await loadSheetBackground(sheet);
     restoreDesign(pageKey());
     pushHistory(true);
+    applyMachinesVisibility();
+    refreshZoneHooksList();
     const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
     setStatus(`${proj} / ${sheet.name} — ページ ${currentPage}`);
   } catch (err) {
@@ -379,16 +397,231 @@ function pageKey() {
   return `${currentProjectId}-${currentDrawingId}-p${currentPage}`;
 }
 
-function getDrawStyle() {
-  const color = document.getElementById("fill-color")?.value || "#fbbf24";
-  const opacity = Number(document.getElementById("fill-opacity")?.value || 0.35);
-  return getFillStyle(color, opacity);
-}
-
 function setupDrawStyle() {
   document.getElementById("snap-grid")?.addEventListener("change", (e) => {
     setSnapEnabled(e.target.checked);
   });
+}
+
+function setupZoneUI() {
+  buildZoneHooks();
+  setupZoneModal();
+
+  document.getElementById("btn-hooks-expand-all")?.addEventListener("click", () => {
+    setAllHooksCollapsed(false);
+  });
+  document.getElementById("btn-hooks-collapse-all")?.addEventListener("click", () => {
+    setAllHooksCollapsed(true);
+  });
+
+  document.getElementById("btn-clear-zones")?.addEventListener("click", () => {
+    if (!confirm("区画をすべて消しますか？")) return;
+    canvas.getObjects().filter((o) => o.objectType === "zone").forEach((o) => canvas.remove(o));
+    pushHistory();
+    refreshZoneHooksList();
+  });
+}
+
+const HOOK_STATE_KEY = "renewal-zone-hook-collapsed";
+
+function loadHookCollapsedState() {
+  try {
+    const raw = localStorage.getItem(HOOK_STATE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveHookCollapsedState(map) {
+  localStorage.setItem(HOOK_STATE_KEY, JSON.stringify(map));
+}
+
+function buildZoneHooks() {
+  const container = document.getElementById("zone-hooks");
+  if (!container) return;
+  const collapsed = loadHookCollapsedState();
+  container.innerHTML = "";
+
+  ZONE_PRESETS.forEach((preset) => {
+    const hook = document.createElement("section");
+    hook.className = "zone-hook";
+    hook.dataset.presetId = preset.id;
+    if (collapsed[preset.id]) hook.classList.add("collapsed");
+    if (preset.id === pendingZonePreset?.id) hook.classList.add("active");
+
+    hook.innerHTML = `
+      <button type="button" class="zone-hook-header" aria-expanded="${!collapsed[preset.id]}">
+        <span class="zone-hook-bar" style="background:${preset.color}"></span>
+        <span class="zone-hook-title">${esc(preset.name)}</span>
+        <span class="zone-hook-count" data-count-for="${preset.id}">0</span>
+        <span class="zone-hook-chevron">▼</span>
+      </button>
+      <div class="zone-hook-body">
+        <p class="zone-hook-desc">${esc(preset.desc || "")}</p>
+        <button type="button" class="btn btn-primary btn-sm btn-block btn-draw-zone">区画を描く</button>
+        <ul class="zone-hook-list" data-list-for="${preset.id}"></ul>
+      </div>
+    `;
+
+    const header = hook.querySelector(".zone-hook-header");
+    header.addEventListener("click", (e) => {
+      if (e.target.closest(".btn-draw-zone")) return;
+      const isCollapsed = hook.classList.toggle("collapsed");
+      header.setAttribute("aria-expanded", String(!isCollapsed));
+      const state = loadHookCollapsedState();
+      state[preset.id] = isCollapsed;
+      saveHookCollapsedState(state);
+      selectZonePreset(preset, false);
+    });
+
+    hook.querySelector(".btn-draw-zone").addEventListener("click", (e) => {
+      e.stopPropagation();
+      hook.classList.remove("collapsed");
+      header.setAttribute("aria-expanded", "true");
+      const state = loadHookCollapsedState();
+      state[preset.id] = false;
+      saveHookCollapsedState(state);
+      selectZonePreset(preset, true);
+    });
+
+    container.appendChild(hook);
+  });
+
+  if (!Object.keys(collapsed).length && ZONE_PRESETS[0]) {
+    const first = container.querySelector(".zone-hook");
+    first?.classList.remove("collapsed");
+    first?.querySelector(".zone-hook-header")?.setAttribute("aria-expanded", "true");
+  }
+
+  updateZoneActiveLabel();
+  refreshZoneHooksList();
+}
+
+function setAllHooksCollapsed(collapsed) {
+  const state = {};
+  document.querySelectorAll(".zone-hook").forEach((hook) => {
+    hook.classList.toggle("collapsed", collapsed);
+    hook.querySelector(".zone-hook-header")?.setAttribute("aria-expanded", String(!collapsed));
+    state[hook.dataset.presetId] = collapsed;
+  });
+  saveHookCollapsedState(state);
+}
+
+function getZonesOnCanvas() {
+  return canvas?.getObjects().filter((o) => o.objectType === "zone") ?? [];
+}
+
+function refreshZoneHooksList() {
+  if (!canvas) return;
+  const zones = getZonesOnCanvas();
+  const counts = Object.fromEntries(ZONE_PRESETS.map((p) => [p.id, 0]));
+
+  zones.forEach((z) => {
+    const id = z.zonePresetId || ZONE_PRESETS.find((p) => p.name === z.zoneName)?.id || "other";
+    if (counts[id] !== undefined) counts[id]++;
+    else counts.other = (counts.other || 0) + 1;
+  });
+
+  ZONE_PRESETS.forEach((preset) => {
+    const countEl = document.querySelector(`[data-count-for="${preset.id}"]`);
+    if (countEl) countEl.textContent = String(counts[preset.id] || 0);
+
+    const list = document.querySelector(`[data-list-for="${preset.id}"]`);
+    if (!list) return;
+    list.innerHTML = "";
+
+    const matched = zones.filter((z) => {
+      const id = z.zonePresetId || ZONE_PRESETS.find((p) => p.name === z.zoneName)?.id;
+      return id === preset.id;
+    });
+
+    if (!matched.length) {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "zone-hook-item empty";
+      btn.textContent = "まだ区画なし";
+      li.appendChild(btn);
+      list.appendChild(li);
+      return;
+    }
+
+    matched.forEach((zone, i) => {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "zone-hook-item";
+      const memo = zone.zoneMemo?.trim();
+      btn.textContent = memo
+        ? `${zone.zoneName || preset.name} — ${memo.slice(0, 18)}${memo.length > 18 ? "…" : ""}`
+        : zone.zoneName || `${preset.name} ${i + 1}`;
+      btn.addEventListener("click", () => {
+        canvas.setActiveObject(zone);
+        canvas.requestRenderAll();
+        openZoneModal(zone);
+      });
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+  });
+}
+
+function selectZonePreset(preset, startDraw = true) {
+  pendingZonePreset = preset;
+  highlightZonePreset();
+  updateZoneActiveLabel();
+  if (startDraw) setTool("zone");
+  else flashStatus(`「${preset.name}」を選択中`);
+}
+
+function highlightZonePreset() {
+  document.querySelectorAll(".zone-hook").forEach((hook) => {
+    hook.classList.toggle("active", hook.dataset.presetId === pendingZonePreset?.id);
+  });
+}
+
+function updateZoneActiveLabel() {
+  const el = document.getElementById("zone-active-label");
+  if (el && pendingZonePreset) el.textContent = pendingZonePreset.name;
+}
+
+function setupZoneModal() {
+  document.getElementById("zone-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = document.getElementById("zone-name").value.trim();
+    const memo = document.getElementById("zone-memo").value.trim();
+    if (!name) return;
+
+    if (editingZone) {
+      editingZone.set({ zoneName: name, zoneMemo: memo });
+      updateZoneLabel(editingZone);
+      canvas.requestRenderAll();
+    }
+    document.getElementById("zone-modal").close();
+    editingZone = null;
+    pushHistory();
+    scheduleAutoSave();
+    refreshZoneHooksList();
+  });
+
+  document.getElementById("zone-delete")?.addEventListener("click", () => {
+    if (editingZone) {
+      canvas.remove(editingZone);
+      editingZone = null;
+      document.getElementById("zone-modal").close();
+      pushHistory();
+      refreshZoneHooksList();
+    }
+  });
+}
+
+function openZoneModal(zone) {
+  editingZone = zone;
+  document.getElementById("zone-name").value = zone.zoneName || "";
+  document.getElementById("zone-memo").value = zone.zoneMemo || "";
+  document.getElementById("zone-delete").hidden = !zone;
+  document.getElementById("zone-modal").showModal();
 }
 
 function setupProposalModal() {
@@ -439,7 +672,9 @@ function getUseImagePref() {
 }
 
 async function rebuildPalette() {
+  if (!MACHINES_UI_ENABLED) return;
   const container = document.getElementById("palette");
+  if (!container) return;
   container.innerHTML = "";
   const parts = getAllParts();
   const order = getCategoryOrder();
@@ -494,6 +729,7 @@ async function rebuildPalette() {
 }
 
 async function selectPart(def) {
+  if (!MACHINES_UI_ENABLED) return;
   const enriched = await enrichPartWithImage({
     ...attachImageToPart(def),
     useImage: getUseImagePref(),
@@ -506,6 +742,7 @@ async function selectPart(def) {
 }
 
 async function showMachinePreview(def) {
+  if (!MACHINES_UI_ENABLED) return;
   const panel = document.getElementById("machine-preview-panel");
   const imgEl = document.getElementById("machine-preview-img");
   const placeholder = document.getElementById("machine-preview-placeholder");
@@ -548,7 +785,12 @@ function highlightSelectedPart() {
 // ── Canvas interaction ──────────────────────────────
 function onCanvasMouseDown(opt) {
   const e = opt.e;
-  if (activeTool === "line" || activeTool === "rect" || activeTool === "pen" || activeTool === "fill-poly") return;
+  if (activeTool === "line" || activeTool === "pen" || activeTool === "zone") return;
+
+  if (e.button === 0 && activeTool === "select" && opt.target?.objectType === "zone") {
+    zoneTapStart = { x: e.clientX, y: e.clientY, target: opt.target };
+    return;
+  }
 
   if (e.button === 2) {
     const ptr = canvas.getPointer(e);
@@ -569,7 +811,7 @@ function onCanvasMouseDown(opt) {
     return;
   }
 
-  if (activeTool === "place" && pendingPart && (!opt.target || opt.target?.objectType === "drawing")) {
+  if (MACHINES_UI_ENABLED && activeTool === "place" && pendingPart && (!opt.target || opt.target?.objectType === "drawing")) {
     placeStart = canvas.getPointer(e);
     placePreview = new fabric.Rect({
       left: placeStart.x,
@@ -614,6 +856,15 @@ function onCanvasMouseMove(opt) {
 }
 
 async function onCanvasMouseUp(opt) {
+  if (zoneTapStart && activeTool === "select") {
+    const e = opt.e;
+    const moved = Math.hypot(e.clientX - zoneTapStart.x, e.clientY - zoneTapStart.y);
+    if (moved < 6 && opt.target?.objectType === "zone") {
+      openZoneModal(opt.target);
+    }
+    zoneTapStart = null;
+  }
+
   if (isPanning) {
     isPanning = false;
     lastPan = null;
@@ -622,7 +873,7 @@ async function onCanvasMouseUp(opt) {
     return;
   }
 
-  if (placeStart && placePreview && pendingPart) {
+  if (placeStart && placePreview && pendingPart && MACHINES_UI_ENABLED) {
     const rawW = placePreview.width;
     const rawH = placePreview.height;
     const left = placePreview.left;
@@ -663,12 +914,34 @@ async function addPartToCanvas(def, x, y, w, h) {
 // ── Memo tooltip ────────────────────────────────────
 function onObjectHover(opt) {
   const obj = opt.target;
-  if (obj?.objectType !== "memo") return;
-  showMemoTooltip(opt.e, obj.memoData);
+  if (obj?.objectType === "memo") {
+    showMemoTooltip(opt.e, obj.memoData);
+    return;
+  }
+  if (obj?.objectType === "zone") {
+    showZoneTooltip(opt.e, obj);
+    return;
+  }
 }
 
 function onObjectOut(opt) {
   if (opt.target?.objectType === "memo") hideMemoTooltip();
+  if (opt.target?.objectType === "zone") hideZoneTooltip();
+}
+
+function showZoneTooltip(e, zone) {
+  const memo = zone.zoneMemo?.trim();
+  zoneTooltip.innerHTML = memo
+    ? `<strong>${esc(zone.zoneName || "区画")}</strong>${esc(memo)}`
+    : `<strong>${esc(zone.zoneName || "区画")}</strong><span style="color:var(--muted)">クリックでメモ</span>`;
+  zoneTooltip.hidden = false;
+  const wrap = canvasWrap.getBoundingClientRect();
+  zoneTooltip.style.left = `${e.clientX - wrap.left + 12}px`;
+  zoneTooltip.style.top = `${e.clientY - wrap.top + 12}px`;
+}
+
+function hideZoneTooltip() {
+  zoneTooltip.hidden = true;
 }
 
 function showMemoTooltip(e, data) {
@@ -702,14 +975,14 @@ function setupModals() {
     btn.addEventListener("click", () => btn.closest("dialog").close());
   });
 
-  document.getElementById("btn-new-part").addEventListener("click", () => {
+  document.getElementById("btn-new-part")?.addEventListener("click", () => {
     document.getElementById("part-form").reset();
     document.getElementById("new-part-fill").value = "#dbeafe";
     document.getElementById("new-part-stroke").value = "#2563eb";
     document.getElementById("part-modal").showModal();
   });
 
-  document.getElementById("new-part-category").addEventListener("change", (e) => {
+  document.getElementById("new-part-category")?.addEventListener("change", (e) => {
     const c = CATEGORY_COLORS[e.target.value];
     if (c) {
       document.getElementById("new-part-fill").value = c.fill;
@@ -717,7 +990,7 @@ function setupModals() {
     }
   });
 
-  document.getElementById("part-form").addEventListener("submit", async (e) => {
+  document.getElementById("part-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const imageInput = document.getElementById("new-part-image");
     let imageData = null;
@@ -806,7 +1079,7 @@ function setupToolbar() {
     flashStatus("保存しました");
   });
   document.getElementById("btn-export").addEventListener("click", exportPng);
-  document.getElementById("btn-clear-objects").addEventListener("click", () => {
+  document.getElementById("btn-clear-objects")?.addEventListener("click", () => {
     if (!confirm("配置・描画・メモをすべて消しますか？（図面は残ります）")) return;
     getUserObjects().forEach((o) => canvas.remove(o));
     pushHistory();
@@ -836,20 +1109,27 @@ function setTool(tool) {
     canvas.freeDrawingBrush.width = 2;
   }
 
-  if (tool === "line" || tool === "rect") {
+  if (tool === "line") {
     canvas.selection = false;
     canvas.skipTargetFind = true;
     enableShapeDraw(tool);
-  } else if (tool === "fill-poly") {
+  } else if (tool === "zone") {
     canvas.selection = false;
     canvas.skipTargetFind = true;
-    polygonCleanup = enablePolygonFill(canvas, getDrawStyle, () => {
-      polygonCleanup = null;
-      pushHistory();
-      setTool("select");
-    });
-    flashStatus("塗り：頂点をクリック → 始点で閉じる / Enterで確定 / Escで取消");
-  } else if (tool === "place") {
+    polygonCleanup = enableZoneDraw(
+      canvas,
+      () => pendingZonePreset,
+      (zone) => {
+        polygonCleanup = null;
+        pushHistory();
+        applyInteractiveControls(zone);
+        refreshZoneHooksList();
+        openZoneModal(zone);
+        setTool("select");
+      }
+    );
+    flashStatus(`「${pendingZonePreset.name}」— 角をクリック → 始点で閉じる / Enter確定 / Backspaceで戻す`);
+  } else if (tool === "place" && MACHINES_UI_ENABLED) {
     canvas.selection = false;
     canvas.skipTargetFind = false;
   } else if (tool === "pan") {
@@ -869,11 +1149,11 @@ function updateCanvasCursor() {
     canvas.setCursor("grab");
     return;
   }
-  if (activeTool === "place") {
+  if (MACHINES_UI_ENABLED && activeTool === "place") {
     canvas.setCursor("crosshair");
     return;
   }
-  if (activeTool === "line" || activeTool === "rect" || activeTool === "fill-poly") {
+  if (activeTool === "line" || activeTool === "zone") {
     canvas.setCursor("crosshair");
     return;
   }
@@ -886,37 +1166,17 @@ function enableShapeDraw(kind) {
   disableShapeDraw();
   let start = null;
   let shape = null;
-  const rectStyle = () => ({ ...getDrawStyle(), objectType: "fillArea" });
   shapeHandler = (opt) => {
     const ptr = snapPoint(canvas.getPointer(opt.e), canvas, opt.e);
     const t = opt.e.type;
     if (t === "mousedown") {
       start = ptr;
-      shape =
-        kind === "line"
-          ? new fabric.Line([ptr.x, ptr.y, ptr.x, ptr.y], { stroke: "#ef4444", strokeWidth: 2 })
-          : new fabric.Rect({
-              left: ptr.x,
-              top: ptr.y,
-              width: 0,
-              height: 0,
-              ...rectStyle(),
-            });
+      shape = new fabric.Line([ptr.x, ptr.y, ptr.x, ptr.y], { stroke: "#ef4444", strokeWidth: 2 });
       canvas.add(shape);
     } else if (t === "mousemove" && start && shape) {
-      if (kind === "line") shape.set({ x2: ptr.x, y2: ptr.y });
-      else
-        shape.set({
-          width: Math.abs(ptr.x - start.x),
-          height: Math.abs(ptr.y - start.y),
-          left: Math.min(ptr.x, start.x),
-          top: Math.min(ptr.y, start.y),
-        });
+      shape.set({ x2: ptr.x, y2: ptr.y });
       canvas.requestRenderAll();
     } else if (t === "mouseup") {
-      if (kind === "rect" && shape && (shape.width < 4 || shape.height < 4)) {
-        canvas.remove(shape);
-      }
       start = null;
       shape = null;
       pushHistory();
@@ -957,6 +1217,7 @@ function setupPropsForm() {
   const bind = (id, fn) => document.getElementById(id)?.addEventListener("input", fn);
 
   document.getElementById("prop-use-image")?.addEventListener("change", (e) => {
+    if (!MACHINES_UI_ENABLED) return;
     const on = e.target.checked;
     localStorage.setItem("renewal-use-image", on);
     if (pendingPart) pendingPart.useImage = on;
@@ -976,15 +1237,17 @@ function applyPropToSelection(field) {
   const obj = canvas.getActiveObject();
   if (!obj) return;
 
-  if (obj.objectType === "fillArea") {
+  if (obj.objectType === "zone" || obj.objectType === "fillArea") {
+    if (field === "label") {
+      obj.set("zoneName", document.getElementById("prop-label").value.trim());
+      updateZoneLabel(obj);
+    }
     if (field === "fill") {
-      const color = document.getElementById("prop-fill").value;
-      const opacity = Number(document.getElementById("fill-opacity")?.value || 0.35);
-      const style = getFillStyle(color, opacity);
-      obj.set({ fill: style.fill, stroke: null, strokeWidth: 0 });
+      updateZoneColors(obj, document.getElementById("prop-fill").value, obj.zoneOpacity);
     }
     canvas.requestRenderAll();
     scheduleAutoSave();
+    updateProps();
     return;
   }
 
@@ -1051,14 +1314,12 @@ function updateProps() {
   if (!obj) {
     content.innerHTML = `<p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>`;
     form.hidden = true;
-    if (pendingPart) showMachinePreview(pendingPart);
-    else document.getElementById("machine-preview-panel").hidden = true;
+    if (MACHINES_UI_ENABLED && pendingPart) showMachinePreview(pendingPart);
     return;
   }
 
   if (obj.objectType === "memo") {
     form.hidden = true;
-    document.getElementById("machine-preview-panel").hidden = true;
     const d = obj.memoData || {};
     content.innerHTML = `
       <p class="prop-type">微光メモ</p>
@@ -1072,22 +1333,26 @@ function updateProps() {
     return;
   }
 
-  if (obj.objectType === "fillArea") {
+  if (obj.objectType === "zone" || obj.objectType === "fillArea") {
+    if (obj.objectType === "fillArea") upgradeZoneObject(obj);
     applyInteractiveControls(obj);
     form.hidden = false;
-    document.getElementById("machine-preview-panel").hidden = true;
-    content.innerHTML = `<p class="prop-type">塗りつぶし</p>`;
-    document.getElementById("prop-label").closest(".prop-field").hidden = true;
-    document.querySelectorAll("#props-form .prop-row").forEach((row, i) => {
-      row.hidden = i < 2;
+    const memo = obj.zoneMemo?.trim();
+    content.innerHTML = `
+      <p class="prop-type">区画</p>
+      <p class="prop-meta">${esc(obj.zoneName || "区画")}</p>
+      ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : `<p class="prop-meta" style="color:var(--muted)">メモなし — タップで編集</p>`}
+      <button class="btn btn-ghost btn-block btn-sm" id="btn-edit-zone">メモを編集</button>
+    `;
+    document.getElementById("btn-edit-zone")?.addEventListener("click", () => openZoneModal(obj));
+    document.getElementById("prop-label").closest(".prop-field").hidden = false;
+    document.querySelectorAll("#props-form .prop-row").forEach((row) => {
+      row.hidden = true;
     });
-    document.getElementById("prop-rotation").closest(".prop-field").hidden = false;
-    document.getElementById("prop-fill").value = rgbaToHex(obj.fill) || "#fbbf24";
+    document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
     document.getElementById("prop-stroke").closest(".prop-field").hidden = true;
-    document.getElementById("prop-width").value = Math.round(obj.getScaledWidth());
-    document.getElementById("prop-height").value = Math.round(obj.getScaledHeight());
-    document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
-    document.getElementById("prop-rotation-val").textContent = `${Math.round(obj.angle || 0)}°`;
+    document.getElementById("prop-label").value = obj.zoneName || "";
+    document.getElementById("prop-fill").value = rgbToHex(obj.zoneColor) || "#f59e0b";
     return;
   }
 
@@ -1096,7 +1361,7 @@ function updateProps() {
     row.hidden = false;
   });
 
-  if (obj.objectType === "part") {
+  if (obj.objectType === "part" && MACHINES_UI_ENABLED) {
     document.getElementById("prop-stroke").closest(".prop-field").hidden =
       !!obj.partImageMode && !obj._objects?.some((o) => o.type === "text" && (o.text === "✕" || o.text === "○"));
     const countLine = obj.inventoryCount
@@ -1126,6 +1391,16 @@ function updateProps() {
       useImage: obj.partImageMode,
       id: obj.partId,
     });
+    return;
+  }
+
+  if (obj.objectType === "part") {
+    form.hidden = true;
+    content.innerHTML = `
+      <p class="prop-type">配置オブジェクト</p>
+      <p class="prop-meta">${esc(obj.partLabel || "パーツ")}</p>
+      <p class="prop-meta" style="color:var(--muted)">マシン配置は現在オフです</p>
+    `;
     return;
   }
 
@@ -1196,17 +1471,34 @@ function restoreDesign(key) {
   if (!data.objects?.length) return;
   fabric.util.enlivenObjects(data.objects, (objs) => {
     objs.forEach((o) => {
-      upgradePartGroup(o);
-      if (o.objectType === "fillArea") {
-        o.set({ strokeWidth: 0, stroke: null, rx: 0, ry: 0 });
+      if (o.objectType === "fillArea" || o.objectType === "zone") {
+        upgradeZoneObject(o);
         applyInteractiveControls(o);
+      } else {
+        upgradePartGroup(o);
       }
       canvas.add(o);
     });
     if (drawingImage) drawingImage.sendToBack();
     canvas.requestRenderAll();
+    applyMachinesVisibility();
+    refreshZoneHooksList();
     scheduleAutoSave();
   });
+}
+
+function applyMachinesVisibility() {
+  if (!canvas) return;
+  canvas.getObjects().forEach((o) => {
+    if (o.objectType !== "part") return;
+    const show = MACHINES_UI_ENABLED;
+    o.set({
+      visible: show,
+      evented: show,
+      selectable: show,
+    });
+  });
+  canvas.requestRenderAll();
 }
 
 function exportPng() {
@@ -1229,8 +1521,12 @@ function setupKeyboard() {
       e.preventDefault();
       updateCanvasCursor();
     }
-    if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelected(); }
+    if (e.key === "Delete" || (e.key === "Backspace" && activeTool === "select")) {
+      e.preventDefault();
+      deleteSelected();
+    }
     if (e.key === "z" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
+    else if (e.key === "z" || e.key === "Z") setTool("zone");
     if (e.key === "v" || e.key === "V") setTool("select");
     if (e.key === "h" || e.key === "H") setTool("pan");
     if (e.key === "p" || e.key === "P") setTool("pen");

@@ -11,6 +11,9 @@ export const DRAWINGS = [
 
 export const STORAGE_PREFIX = "renewal-studio-";
 
+/** false = マシンUI非表示（データファイルは残す） */
+export const MACHINES_UI_ENABLED = false;
+
 export const DEFAULT_PARTS = [
   { id: "preset-remove", label: "撤去", category: "マーク", w: 50, h: 50, fill: "rgba(220,38,38,0.15)", stroke: "#dc2626", mark: "✕" },
   { id: "preset-keep", label: "残す", category: "マーク", w: 50, h: 50, fill: "rgba(22,163,74,0.15)", stroke: "#16a34a", mark: "○" },

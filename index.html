@@ -32,18 +32,20 @@
       </div>
 
       <div class="topbar-group tools">
-        <button class="tool-btn active" data-tool="select" title="選択・図面ドラッグで移動 (V)">↖ 選択</button>
-        <button class="tool-btn" data-tool="place" title="パーツをドラッグして配置">⊞ 配置</button>
-        <button class="tool-btn" data-tool="pen" title="フリーハンド (P)">✏ ペン</button>
-        <button class="tool-btn" data-tool="line" title="直線">／ 線</button>
-        <button class="tool-btn" data-tool="rect" title="矩形塗り">□ 矩形</button>
-        <button class="tool-btn" data-tool="fill-poly" title="多角形塗り（頂点クリック→始点で閉じる）">▧ 塗り</button>
+        <button class="tool-btn" data-tool="select" title="選択・区画タップでメモ (V)">↖ 選択</button>
+        <button class="tool-btn active" data-tool="zone" title="角をクリックして線で区画を囲む (Z)">⬡ 区画</button>
         <button class="tool-btn" data-tool="pan" title="図面をドラッグして移動 (H)">✋ 移動</button>
+        <details class="tool-more">
+          <summary>その他</summary>
+          <div class="tool-more-inner">
+            <button class="tool-btn" data-tool="pen" title="フリーハンド (P)">✏ ペン</button>
+            <button class="tool-btn" data-tool="line" title="直線">／ 線</button>
+          </div>
+        </details>
       </div>
 
       <div class="topbar-group draw-style">
-        <label class="topbar-label mini">塗色<input type="color" id="fill-color" value="#fbbf24" /></label>
-        <label class="topbar-label mini">透明度<input type="range" id="fill-opacity" min="0.1" max="0.9" step="0.05" value="0.35" /></label>
+        <span class="topbar-label mini zone-active-label" id="zone-active-label">FWエリア</span>
         <label class="topbar-label mini snap-label"><input type="checkbox" id="snap-grid" checked /> 吸着 <span class="snap-hint">(Shiftで微調整)</span></label>
       </div>
 
@@ -58,20 +60,24 @@
     </header>
 
     <div class="workspace">
-      <aside class="palette-panel">
+      <aside class="palette-panel zone-sidebar">
         <div class="panel-header-row">
-          <div class="panel-title">パーツ</div>
-          <button class="btn btn-primary btn-xs" id="btn-new-part">＋ 自作</button>
+          <div class="panel-title">区画区分</div>
+          <div class="hook-toolbar">
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-expand-all" title="すべて展開">展開</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-collapse-all" title="すべて折りたたむ">折畳</button>
+          </div>
         </div>
-        <p class="panel-hint">選択 → 図面上をドラッグしてサイズ調整・試着</p>
-        <div id="palette"></div>
-        <button class="btn btn-danger btn-block" id="btn-clear-objects">配置をすべて消去</button>
+        <p class="panel-hint">区分を開く → <strong>区画を描く</strong> → 図面上で角をクリック</p>
+        <div id="zone-hooks" class="zone-hooks"></div>
+        <button class="btn btn-danger btn-block" id="btn-clear-zones">区画をすべて消去</button>
       </aside>
 
       <div class="canvas-area">
         <div id="canvas-wrap" class="canvas-wrap">
           <canvas id="design-canvas"></canvas>
           <div id="memo-tooltip" class="memo-tooltip" hidden></div>
+          <div id="zone-tooltip" class="zone-tooltip" hidden></div>
         </div>
         <footer id="status" class="status-bar">準備中… — 変更は自動保存されます</footer>
       </div>
@@ -114,29 +120,15 @@
             <span id="prop-rotation-val" class="prop-val">0°</span>
           </label>
         </div>
-        <div id="machine-preview-panel" class="machine-preview-panel" hidden>
-          <p class="panel-title">マシンプレビュー</p>
-          <div class="machine-preview-frame">
-            <img id="machine-preview-img" class="machine-preview-img" alt="" hidden />
-            <p id="machine-preview-placeholder" class="machine-preview-placeholder"></p>
-          </div>
-          <label class="prop-field preview-toggle">
-            <input type="checkbox" id="prop-use-image" checked />
-            画像付きで配置（名称で自動紐づけ）
-          </label>
-          <p id="machine-preview-hint" class="machine-preview-hint"></p>
-        </div>
         <button class="btn btn-ghost btn-block" id="btn-delete">選択を削除</button>
         <div class="help-box">
-          <p><strong>操作</strong></p>
+          <p><strong>大枠づくり</strong></p>
           <ul>
-            <li><strong>図面をドラッグ</strong>で移動（選択ツール時）</li>
-            <li>ホイールでズーム / スペース+ドラッグ / 移動ツール</li>
-            <li>パーツ選択 → ドラッグで配置・試着</li>
-            <li><strong>右クリック</strong>で微光メモを設置</li>
-            <li>配置・移動は<strong>自動保存</strong>（ブラウザ内）</li>
-            <li><strong>▧塗り</strong>：頂点クリック→始点で閉じる / Enterで確定</li>
-            <li>「＋案」でリニューアル案画像を取り込み</li>
+            <li>左の<strong>区分フック</strong>を開いて区画を描く</li>
+            <li><strong>⬡区画</strong>：角をクリックして線で囲む</li>
+            <li>始点をクリック / <strong>Enter</strong> で確定、<strong>Backspace</strong> で1点戻す</li>
+            <li>区画タップでメモ / フック内リストから再選択</li>
+            <li>フック上部の<strong>展開・折畳</strong>で全体表示</li>
           </ul>
         </div>
       </aside>
@@ -169,57 +161,27 @@
     </form>
   </dialog>
 
-  <!-- 自作パーツ -->
-  <dialog id="part-modal" class="modal">
-    <form id="part-form" method="dialog">
+  <!-- 区画メモ -->
+  <dialog id="zone-modal" class="modal">
+    <form id="zone-form" method="dialog">
       <header class="modal-header">
-        <h3>自作パーツを登録</h3>
+        <h3>区画メモ</h3>
         <button type="button" class="btn-close" data-close>×</button>
       </header>
       <div class="modal-body">
-        <label class="prop-field">名称 <span class="req">*</span>
-          <input type="text" id="new-part-label" required placeholder="例：ラットプルダウン" />
+        <label class="prop-field">エリア名 <span class="req">*</span>
+          <input type="text" id="zone-name" required placeholder="例：FWエリア" />
         </label>
-        <label class="prop-field">区分
-          <select id="new-part-category">
-            <option>筋トレ</option><option>有酸素</option><option>フリーウェイト</option>
-            <option>設備</option><option>什器</option><option>構造</option><option>その他</option>
-          </select>
-        </label>
-        <div class="prop-row">
-          <label class="prop-field">初期幅 (px)
-            <input type="number" id="new-part-w" value="80" min="20" />
-          </label>
-          <label class="prop-field">初期高 (px)
-            <input type="number" id="new-part-h" value="60" min="20" />
-          </label>
-        </div>
-        <div class="prop-row">
-          <label class="prop-field">実寸 幅 (mm)
-            <input type="text" id="new-part-mm-w" placeholder="任意" />
-          </label>
-          <label class="prop-field">実寸 高 (mm)
-            <input type="text" id="new-part-mm-h" placeholder="任意" />
-          </label>
-        </div>
-        <div class="prop-row">
-          <label class="prop-field">塗り色
-            <input type="color" id="new-part-fill" value="#dbeafe" />
-          </label>
-          <label class="prop-field">枠色
-            <input type="color" id="new-part-stroke" value="#2563eb" />
-          </label>
-        </div>
-        <label class="prop-field">備考
-          <textarea id="new-part-note" rows="2" placeholder="型番・メーカーなど"></textarea>
-        </label>
-        <label class="prop-field">画像（任意）
-          <input type="file" id="new-part-image" accept="image/*" />
+        <label class="prop-field">メモ
+          <textarea id="zone-memo" rows="4" placeholder="面積感、用途、制約、要望など"></textarea>
         </label>
       </div>
       <footer class="modal-footer">
-        <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
-        <button type="submit" class="btn btn-primary">登録してパレットに追加</button>
+        <button type="button" class="btn btn-danger" id="zone-delete" hidden>区画を削除</button>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
       </footer>
     </form>
   </dialog>
