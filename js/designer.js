@@ -18,6 +18,8 @@ import {
   updateZoneColors,
   upgradeZoneObject,
   removeOrphanZonePreviews,
+  refreshZoneDisplay,
+  ensureZoneDimensionMarkers,
 } from "./zones.js";
 import {
   addCustomZonePreset,
@@ -32,6 +34,18 @@ import {
   getManifestHint,
 } from "./machine-images.js";
 import { pdfToDataUrl } from "./pdf-loader.js";
+import {
+  canvasToImagePx,
+  imagePxDistance,
+  mmPerImagePxFromCalibration,
+  computeZoneMetrics,
+  computeZoneMetricsFromCanvasPoints,
+  segmentMetrics,
+  formatZoneSizeText,
+  formatZoneSizeShort,
+  formatScaleStatus,
+  formatSegmentDimsAlways,
+} from "./drawing-scale.js";
 import { saveDesign, loadDesign } from "./storage.js";
 import {
   loadCustomParts,
@@ -57,6 +71,7 @@ const canvasWrap = document.getElementById("canvas-wrap");
 const statusEl = document.getElementById("status");
 const memoTooltip = document.getElementById("memo-tooltip");
 const zoneTooltip = document.getElementById("zone-tooltip");
+const drawDimHud = document.getElementById("draw-dim-hud");
 
 let canvas;
 let currentProjectId = MASTER_PROJECT_ID;
@@ -80,6 +95,8 @@ let editingZone = null;
 let zoneActionTarget = null;
 let editingCustomPresetId = null;
 let drawingImage = null;
+let currentMmPerImagePx = null;
+let scaleCalibCleanup = null;
 let autoSaveTimer = null;
 let lastSavedAt = null;
 const history = [];
@@ -123,7 +140,8 @@ function initCanvas() {
       normalizePartAfterResize(e.target);
     }
     if (e.target?.objectType === "zone") {
-      updateZoneLabel(e.target);
+      refreshZoneDisplay(e.target, computeZoneMetricsFor(e.target));
+      refreshZoneHooksList();
     }
     if (e.target) applyInteractiveControls(e.target);
     pushHistory();
@@ -278,6 +296,9 @@ async function loadDrawing(id) {
     polygonCleanup = null;
     await loadSheetBackground(sheet);
     await restoreDesign(pageKey());
+    if (!currentMmPerImagePx) tryDefaultScale();
+    refreshAllZoneMetrics();
+    updateScaleUI();
     pushHistory(true);
     isRestoringHistory = false;
     applyMachinesVisibility();
@@ -406,6 +427,9 @@ async function reloadPage() {
     await loadDrawingImage(pdf.dataUrl);
   }
   await restoreDesign(pageKey());
+  if (!currentMmPerImagePx) tryDefaultScale();
+  refreshAllZoneMetrics();
+  updateScaleUI();
   pushHistory(true);
   isRestoringHistory = false;
   setStatus(`${sheet.name} — ページ ${currentPage}`);
@@ -426,6 +450,7 @@ function setupZoneUI() {
   setupZoneModal();
   setupZoneActionModal();
   setupCustomPresetModal();
+  setupScaleUI();
 
   document.getElementById("btn-hooks-expand-all")?.addEventListener("click", () => {
     setAllHooksCollapsed(false);
@@ -440,6 +465,153 @@ function setupZoneUI() {
     pushHistory();
     refreshZoneHooksList();
   });
+}
+
+function computeZoneMetricsFor(zone) {
+  return computeZoneMetrics(zone, drawingImage, currentMmPerImagePx);
+}
+
+function refreshAllZoneMetrics() {
+  getZonesOnCanvas().forEach((zone) => {
+    ensureZoneDimensionMarkers(zone);
+    refreshZoneDisplay(zone, computeZoneMetricsFor(zone));
+  });
+  canvas?.requestRenderAll();
+}
+
+function showDrawDimHud(metrics) {
+  if (!drawDimHud) return;
+  if (!metrics) {
+    drawDimHud.hidden = true;
+    return;
+  }
+  drawDimHud.textContent = formatSegmentDimsAlways(metrics);
+  drawDimHud.hidden = false;
+}
+
+function hideDrawDimHud() {
+  if (drawDimHud) drawDimHud.hidden = true;
+}
+
+function tryDefaultScale() {
+  if (currentMmPerImagePx || !drawingImage) return;
+  const sheet = getCurrentSheet(currentDrawingId);
+  if (sheet?.planWidthMm && drawingImage.width) {
+    currentMmPerImagePx = sheet.planWidthMm / drawingImage.width;
+  }
+}
+
+function updateScaleUI() {
+  const el = document.getElementById("scale-status");
+  if (el) el.textContent = formatScaleStatus(currentMmPerImagePx);
+}
+
+function setupScaleUI() {
+  document.getElementById("btn-scale-calibrate")?.addEventListener("click", () => {
+    const mm = parseFloat(document.getElementById("scale-known-mm")?.value);
+    if (!mm || mm <= 0) {
+      flashStatus("既知の距離（mm）を入力してください");
+      return;
+    }
+    if (!drawingImage) {
+      flashStatus("図面を読み込んでから設定してください");
+      return;
+    }
+    startScaleCalibration(mm);
+  });
+}
+
+function startScaleCalibration(realMm) {
+  if (scaleCalibCleanup) scaleCalibCleanup();
+  if (polygonCleanup) {
+    polygonCleanup();
+    polygonCleanup = null;
+  }
+  removeOrphanZonePreviews(canvas);
+
+  const points = [];
+  let previewLine = null;
+  const dots = [];
+
+  const cleanup = () => {
+    canvas.off("mouse:down", handler);
+    canvas.off("mouse:move", handler);
+    document.removeEventListener("keydown", keyHandler);
+    dots.forEach((d) => canvas.remove(d));
+    if (previewLine) canvas.remove(previewLine);
+    canvas.requestRenderAll();
+    scaleCalibCleanup = null;
+  };
+
+  scaleCalibCleanup = cleanup;
+
+  const handler = (opt) => {
+    const e = opt.e;
+    const ptr = canvas.getPointer(e);
+
+    if (e.type === "mousemove" && points.length === 1) {
+      if (previewLine) canvas.remove(previewLine);
+      previewLine = new fabric.Line([points[0].x, points[0].y, ptr.x, ptr.y], {
+        stroke: "#f59e0b",
+        strokeWidth: 2,
+        strokeDashArray: [6, 4],
+        selectable: false,
+        evented: false,
+        _skipHistory: true,
+        _scalePreview: true,
+      });
+      canvas.add(previewLine);
+      canvas.requestRenderAll();
+    }
+
+    if (e.type !== "mousedown" || e.button !== 0) return;
+
+    points.push(ptr);
+    const dot = new fabric.Circle({
+      left: ptr.x,
+      top: ptr.y,
+      radius: 5,
+      fill: "#f59e0b",
+      stroke: "#fff",
+      strokeWidth: 2,
+      originX: "center",
+      originY: "center",
+      selectable: false,
+      evented: false,
+      _skipHistory: true,
+      _scalePreview: true,
+    });
+    dots.push(dot);
+    canvas.add(dot);
+
+    if (points.length === 2) {
+      const ip1 = canvasToImagePx(points[0], drawingImage);
+      const ip2 = canvasToImagePx(points[1], drawingImage);
+      const dist = imagePxDistance(ip1, ip2);
+      currentMmPerImagePx = mmPerImagePxFromCalibration(dist, realMm);
+      cleanup();
+      refreshAllZoneMetrics();
+      updateScaleUI();
+      refreshZoneHooksList();
+      pushHistory();
+      scheduleAutoSave();
+      flashStatus(`縮尺を設定しました（${formatScaleStatus(currentMmPerImagePx)}）`);
+    }
+    canvas.requestRenderAll();
+  };
+
+  const keyHandler = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cleanup();
+      flashStatus("縮尺設定をキャンセルしました");
+    }
+  };
+
+  canvas.on("mouse:down", handler);
+  canvas.on("mouse:move", handler);
+  document.addEventListener("keydown", keyHandler);
+  flashStatus("縮尺: 図面上の2点をクリック（Escでキャンセル）");
 }
 
 const HOOK_STATE_KEY = "renewal-zone-hook-collapsed";
@@ -669,9 +841,11 @@ function refreshZoneHooksList() {
       const memo = zone.zoneMemo?.trim();
       const baseName = zone.zoneName || preset.name;
       const numTag = matched.length > 1 ? ` #${i + 1}` : "";
+      const sizeTag = formatZoneSizeShort(zone._zoneMetrics);
+      const sizeSuffix = sizeTag ? ` · ${sizeTag}` : "";
       btn.textContent = memo
-        ? `${baseName}${numTag} — ${memo.slice(0, 16)}${memo.length > 16 ? "…" : ""}`
-        : `${baseName}${numTag}`;
+        ? `${baseName}${numTag}${sizeSuffix} — ${memo.slice(0, 12)}${memo.length > 12 ? "…" : ""}`
+        : `${baseName}${numTag}${sizeSuffix}`;
       btn.addEventListener("click", () => {
         canvas.setActiveObject(zone);
         canvas.requestRenderAll();
@@ -719,7 +893,7 @@ function setupZoneModal() {
 
     if (editingZone) {
       editingZone.set({ zoneName: name, zoneMemo: memo });
-      updateZoneLabel(editingZone);
+      refreshZoneDisplay(editingZone, computeZoneMetricsFor(editingZone));
       canvas.requestRenderAll();
     }
     document.getElementById("zone-modal").close();
@@ -1118,9 +1292,13 @@ function onObjectOut(opt) {
 
 function showZoneTooltip(e, zone) {
   const memo = zone.zoneMemo?.trim();
+  const sizeLine = formatZoneSizeText(zone._zoneMetrics);
+  const sizeHtml = sizeLine
+    ? `<span class="zone-tip-size">${esc(sizeLine.replace("\n", " / "))}</span>`
+    : `<span style="color:var(--muted)">縮尺未設定 — 左パネルで設定</span>`;
   zoneTooltip.innerHTML = memo
-    ? `<strong>${esc(zone.zoneName || "区画")}</strong>${esc(memo)}`
-    : `<strong>${esc(zone.zoneName || "区画")}</strong><span style="color:var(--muted)">クリックで修正・削除</span>`;
+    ? `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}${esc(memo)}`
+    : `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}<span style="color:var(--muted)">クリックで修正・削除</span>`;
   zoneTooltip.hidden = false;
   const wrap = canvasWrap.getBoundingClientRect();
   zoneTooltip.style.left = `${e.clientX - wrap.left + 12}px`;
@@ -1317,7 +1495,10 @@ function setTool(tool) {
         refreshZoneHooksList();
         openZoneModal(zone);
         setTool("select");
-      }
+      },
+      (points) => computeZoneMetricsFromCanvasPoints(points, drawingImage, currentMmPerImagePx),
+      (a, b) => segmentMetrics(a, b, drawingImage, currentMmPerImagePx),
+      (metrics) => showDrawDimHud(metrics)
     );
     flashStatus(`「${pendingZonePreset.name}」— 角クリックで囲む / 右クリック・Escでやめる`);
   } else if (tool === "place" && MACHINES_UI_ENABLED) {
@@ -1357,19 +1538,86 @@ function enableShapeDraw(kind) {
   disableShapeDraw();
   let start = null;
   let shape = null;
+  let liveDimLabel = null;
+
   shapeHandler = (opt) => {
     const ptr = snapPoint(canvas.getPointer(opt.e), canvas, opt.e);
     const t = opt.e.type;
     if (t === "mousedown") {
       start = ptr;
-      shape = new fabric.Line([ptr.x, ptr.y, ptr.x, ptr.y], { stroke: "#ef4444", strokeWidth: 2 });
+      shape = new fabric.Line([ptr.x, ptr.y, ptr.x, ptr.y], {
+        stroke: "#ef4444",
+        strokeWidth: 2,
+        selectable: false,
+        evented: false,
+        _skipHistory: true,
+      });
       canvas.add(shape);
     } else if (t === "mousemove" && start && shape) {
       shape.set({ x2: ptr.x, y2: ptr.y });
+      const metrics = segmentMetrics(start, ptr, drawingImage, currentMmPerImagePx);
+      showDrawDimHud(metrics);
+      const text = formatSegmentDimsAlways(metrics);
+      const mx = (start.x + ptr.x) / 2;
+      const my = (start.y + ptr.y) / 2;
+      if (!liveDimLabel) {
+        liveDimLabel = new fabric.Text(text, {
+          left: mx,
+          top: my - 8,
+          fontSize: 11,
+          fill: "#1e40af",
+          fontWeight: "600",
+          backgroundColor: "rgba(255,255,255,0.9)",
+          originX: "center",
+          originY: "bottom",
+          selectable: false,
+          evented: false,
+          _skipHistory: true,
+        });
+        canvas.add(liveDimLabel);
+      } else {
+        liveDimLabel.set({ text, left: mx, top: my - 8 });
+      }
       canvas.requestRenderAll();
-    } else if (t === "mouseup") {
+    } else if (t === "mouseup" && start && shape) {
+      const x1 = start.x;
+      const y1 = start.y;
+      const x2 = ptr.x;
+      const y2 = ptr.y;
+      const metrics = segmentMetrics(start, ptr, drawingImage, currentMmPerImagePx);
+      canvas.remove(shape);
+      if (liveDimLabel) canvas.remove(liveDimLabel);
+      hideDrawDimHud();
+
+      const cx = (x1 + x2) / 2;
+      const cy = (y1 + y2) / 2;
+      const line = new fabric.Line([x1 - cx, y1 - cy, x2 - cx, y2 - cy], {
+        stroke: "#ef4444",
+        strokeWidth: 2,
+      });
+      const label = new fabric.Text(formatSegmentDimsAlways(metrics), {
+        left: 0,
+        top: -10,
+        fontSize: 11,
+        fill: "#1e40af",
+        fontWeight: "600",
+        backgroundColor: "rgba(255,255,255,0.9)",
+        originX: "center",
+        originY: "bottom",
+      });
+      const group = new fabric.Group([line, label], {
+        left: cx,
+        top: cy,
+        originX: "center",
+        originY: "center",
+        objectType: "measureLine",
+      });
+      canvas.add(group);
+      canvas.setActiveObject(group);
+
       start = null;
       shape = null;
+      liveDimLabel = null;
       pushHistory();
       setTool("select");
     }
@@ -1384,6 +1632,7 @@ function disableShapeDraw() {
     polygonCleanup();
     polygonCleanup = null;
   }
+  hideDrawDimHud();
   if (!shapeHandler) return;
   canvas.off("mouse:down", shapeHandler);
   canvas.off("mouse:move", shapeHandler);
@@ -1529,9 +1778,14 @@ function updateProps() {
     applyInteractiveControls(obj);
     form.hidden = false;
     const memo = obj.zoneMemo?.trim();
+    const metrics = obj._zoneMetrics;
+    const sizeBlock = metrics
+      ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics).replace("\n", " · "))}</p>`
+      : `<p class="prop-meta" style="color:var(--muted)">サイズ: 縮尺未設定</p>`;
     content.innerHTML = `
       <p class="prop-type">区画</p>
       <p class="prop-meta">${esc(obj.zoneName || "区画")}</p>
+      ${sizeBlock}
       ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : `<p class="prop-meta" style="color:var(--muted)">メモなし</p>`}
       <div class="zone-prop-actions">
         <button class="btn btn-primary btn-sm" id="btn-edit-zone">✎ 修正</button>
@@ -1671,12 +1925,14 @@ function persistCurrent() {
   saveDesign(pageKey(), {
     objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
     viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
+    mmPerImagePx: currentMmPerImagePx,
   });
 }
 
 function restoreDesign(key) {
   return new Promise((resolve) => {
     const data = loadDesign(key);
+    currentMmPerImagePx = data?.mmPerImagePx ?? null;
     if (!data) {
       resolve();
       return;

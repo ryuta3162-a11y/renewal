@@ -2,11 +2,12 @@ export const MASTER_PROJECT_ID = "master";
 
 export const DRAWINGS = [
   { id: "kyodo-7", name: "原本-7", file: "/drawings/kyodo-7.pdf", kind: "pdf" },
-  { id: "kyodo-8", name: "原本-8", file: "/drawings/kyodo-8.pdf", kind: "pdf" },
+  { id: "kyodo-8", name: "原本-8", file: "/drawings/kyodo-8.pdf", kind: "pdf", planWidthMm: 29080 },
   { id: "kyodo-9", name: "原本-9", file: "/drawings/kyodo-9.pdf", kind: "pdf" },
   { id: "kyodo-17", name: "原本-17", file: "/drawings/kyodo-17.pdf", kind: "pdf" },
   { id: "gyotoku-1", name: "行徳-図面1", file: "/drawings/gyotoku-1.pdf", kind: "pdf" },
   { id: "gyotoku-2", name: "行徳-図面2", file: "/drawings/gyotoku-2.pdf", kind: "pdf" },
+  { id: "mito", name: "みと図面", file: "/drawings/mito.pdf", kind: "pdf", planWidthMm: 29080 },
 ];
 
 export const STORAGE_PREFIX = "renewal-studio-";

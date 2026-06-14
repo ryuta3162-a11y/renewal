@@ -69,6 +69,18 @@
           </div>
         </div>
         <p class="panel-hint">区分を開く → <strong>区画を描く</strong> → 同じ名称でも何個でも配置可</p>
+        <div class="scale-panel">
+          <div class="panel-header-row">
+            <span class="panel-title sub">図面縮尺</span>
+          </div>
+          <p class="panel-hint">区画に <strong>㎡・坪・m</strong> を自動表示します</p>
+          <label class="prop-field mini">
+            既知の距離 (mm)
+            <input type="number" id="scale-known-mm" placeholder="例: 8000" min="1" step="1" />
+          </label>
+          <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-scale-calibrate">2点で縮尺設定</button>
+          <p class="scale-status" id="scale-status">縮尺未設定</p>
+        </div>
         <div class="zone-custom-section">
           <div class="panel-header-row">
             <span class="panel-title sub">自作区分</span>
@@ -86,6 +98,7 @@
           <canvas id="design-canvas"></canvas>
           <div id="memo-tooltip" class="memo-tooltip" hidden></div>
           <div id="zone-tooltip" class="zone-tooltip" hidden></div>
+          <div id="draw-dim-hud" class="draw-dim-hud" hidden>横 — 縦 —</div>
         </div>
         <footer id="status" class="status-bar">準備中… — 変更は自動保存されます</footer>
       </div>
@@ -139,6 +152,8 @@
             <li>始点クリック / <strong>Enter</strong> で確定、<strong>Backspace</strong> で1点戻す</li>
             <li><strong>右クリック / Esc</strong> で描画中の区画をやめる</li>
             <li>区画を<strong>クリック</strong> → 修正 or 削除を選択</li>
+            <li>線を引くと<strong>横・縦 (m)</strong>が常に表示（区画・直線）</li>
+            <li>区画に<strong>㎡・坪・m</strong>が自動表示（左の縮尺設定）</li>
             <li>フック上部の<strong>展開・折畳</strong>で全体表示</li>
           </ul>
         </div>

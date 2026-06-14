@@ -1,4 +1,5 @@
 import { snapPoint, hexToRgba } from "./draw-tools.js";
+import { formatZoneSizeText, formatSegmentDimsAlways } from "./drawing-scale.js";
 
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
 
@@ -45,15 +46,106 @@ function polygonCentroid(points) {
   return { x: x / points.length, y: y / points.length };
 }
 
-function fitZoneLabel(name, maxW) {
-  for (let fs = 14; fs >= 8; fs--) {
-    const tb = new fabric.Textbox(name, { width: maxW, fontSize: fs, fontWeight: "700" });
-    if (tb.calcTextHeight() <= 36) return fs;
-  }
-  return 8;
+function localBBoxFromPolyPoints(points) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  points.forEach((p) => {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  });
+  return { minX, minY, maxX, maxY };
 }
 
-export function createZoneGroup(points, preset, memo = "") {
+function createDimMarker(kind) {
+  return new fabric.Text("", {
+    fontSize: 11,
+    fill: "#1e40af",
+    fontWeight: "600",
+    backgroundColor: "rgba(255,255,255,0.88)",
+    _zoneDim: kind,
+    objectCaching: false,
+    selectable: false,
+    evented: false,
+  });
+}
+
+export function updateZoneDimensions(group, metrics) {
+  const poly = group._objects?.[0];
+  if (!poly?.points) return;
+  const dimW = group._objects?.find((o) => o._zoneDim === "width");
+  const dimD = group._objects?.find((o) => o._zoneDim === "depth");
+  if (!dimW || !dimD) return;
+
+  if (!metrics) {
+    dimW.set({ text: "", visible: false });
+    dimD.set({ text: "", visible: false });
+    group.dirty = true;
+    return;
+  }
+
+  const bbox = localBBoxFromPolyPoints(poly.points);
+  const pad = 14;
+
+  dimW.set({
+    text: `横 ${metrics.widthM.toFixed(1)}m`,
+    left: (bbox.minX + bbox.maxX) / 2,
+    top: bbox.maxY + pad,
+    originX: "center",
+    originY: "top",
+    visible: true,
+  });
+  dimD.set({
+    text: `縦 ${metrics.depthM.toFixed(1)}m`,
+    left: bbox.minX - pad,
+    top: (bbox.minY + bbox.maxY) / 2,
+    originX: "right",
+    originY: "center",
+    angle: -90,
+    visible: true,
+  });
+  group.dirty = true;
+}
+
+export function ensureZoneDimensionMarkers(group) {
+  if (group.objectType !== "zone" || group.type !== "group") return group;
+  if (group._objects?.some((o) => o._zoneDim)) return group;
+  group.add(createDimMarker("width"));
+  group.add(createDimMarker("depth"));
+  group.dirty = true;
+  return group;
+}
+
+export function refreshZoneDisplay(group, metrics) {
+  updateZoneLabel(group, metrics);
+  updateZoneDimensions(group, metrics);
+}
+
+function buildZoneLabelText(name, metrics) {
+  const sizeLine = formatZoneSizeText(metrics);
+  if (sizeLine) return `${name}\n${sizeLine}`;
+  return name;
+}
+
+function fitZoneLabel(name, metrics, maxW) {
+  const text = buildZoneLabelText(name, metrics);
+  for (let fs = 13; fs >= 7; fs--) {
+    const tb = new fabric.Textbox(text, {
+      width: maxW,
+      fontSize: fs,
+      fontWeight: "700",
+      lineHeight: 1.12,
+      splitByGrapheme: true,
+    });
+    if (tb.calcTextHeight() <= 64) return fs;
+  }
+  return 7;
+}
+
+export function createZoneGroup(points, preset, memo = "", metrics = null) {
   const style = getZoneStyle(preset.color, preset.opacity);
   const c = polygonCentroid(points);
 
@@ -68,10 +160,11 @@ export function createZoneGroup(points, preset, memo = "") {
     }
   );
 
-  const labelW = Math.max(60, Math.min(160, poly.width || 120));
-  const label = new fabric.Textbox(preset.name, {
+  const labelW = Math.max(72, Math.min(200, poly.width || 120));
+  const labelText = buildZoneLabelText(preset.name, metrics);
+  const label = new fabric.Textbox(labelText, {
     width: labelW,
-    fontSize: fitZoneLabel(preset.name, labelW),
+    fontSize: fitZoneLabel(preset.name, metrics, labelW),
     fill: "#0f172a",
     fontWeight: "700",
     textAlign: "center",
@@ -83,7 +176,10 @@ export function createZoneGroup(points, preset, memo = "") {
     objectCaching: false,
   });
 
-  const group = new fabric.Group([poly, label], {
+  const dimW = createDimMarker("width");
+  const dimD = createDimMarker("depth");
+
+  const group = new fabric.Group([poly, label, dimW, dimD], {
     left: c.x,
     top: c.y,
     originX: "center",
@@ -100,19 +196,22 @@ export function createZoneGroup(points, preset, memo = "") {
   });
 
   group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
+  updateZoneDimensions(group, metrics);
   return group;
 }
 
-export function updateZoneLabel(group) {
+export function updateZoneLabel(group, metrics = undefined) {
   const label = group._objects?.find((o) => o.type === "textbox");
   const poly = group._objects?.[0];
   if (!label || !poly) return;
   const name = group.zoneName || "区画";
-  const labelW = Math.max(60, Math.min(160, (poly.width || 120) * (group.scaleX || 1)));
+  const m = metrics !== undefined ? metrics : group._zoneMetrics ?? null;
+  if (metrics !== undefined) group._zoneMetrics = metrics;
+  const labelW = Math.max(72, Math.min(200, (poly.width || 120) * (group.scaleX || 1)));
   label.set({
-    text: name,
+    text: buildZoneLabelText(name, m),
     width: labelW,
-    fontSize: fitZoneLabel(name, labelW),
+    fontSize: fitZoneLabel(name, m, labelW),
   });
   group.dirty = true;
 }
@@ -147,18 +246,61 @@ export function upgradeZoneObject(obj) {
   if (poly) {
     poly.set({ strokeLineJoin: "miter", strokeWidth: poly.strokeWidth || 2 });
   }
-  if (!obj._objects?.some((o) => o.type === "textbox")) {
+  if (!obj._objects?.some((o) => o.type === "textbox" && !o._zoneDim)) {
     updateZoneLabel(obj);
   }
+  ensureZoneDimensionMarkers(obj);
   return obj;
 }
 
-export function enableZoneDraw(canvas, getPreset, onDone) {
+function makeSegmentDimLabel(a, b, text) {
+  return new fabric.Text(text, {
+    left: (a.x + b.x) / 2,
+    top: (a.y + b.y) / 2 - 8,
+    fontSize: 11,
+    fill: "#1e40af",
+    fontWeight: "600",
+    backgroundColor: "rgba(255,255,255,0.9)",
+    originX: "center",
+    originY: "bottom",
+    selectable: false,
+    evented: false,
+    objectCaching: false,
+    _zonePreview: true,
+    _skipHistory: true,
+  });
+}
+
+export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegmentMetrics, onDimPreview) {
   const points = [];
   let previewLines = [];
   let vertexDots = [];
   let rubberLine = null;
   let previewPoly = null;
+  let liveDimLabel = null;
+  const segmentDimLabels = [];
+
+  function updateLiveDim(a, b) {
+    const metrics = getSegmentMetrics?.(a, b) ?? null;
+    onDimPreview?.(metrics);
+    const text = formatSegmentDimsAlways(metrics);
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    if (!liveDimLabel) {
+      liveDimLabel = makeSegmentDimLabel(a, b, text);
+      canvas.add(liveDimLabel);
+    }
+    liveDimLabel.set({ text, left: mx, top: my - 8 });
+    canvas.requestRenderAll();
+  }
+
+  function clearLiveDim() {
+    if (liveDimLabel) {
+      canvas.remove(liveDimLabel);
+      liveDimLabel = null;
+    }
+    onDimPreview?.(null);
+  }
 
   const handler = (opt) => {
     const e = opt.e;
@@ -179,6 +321,7 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
         _skipHistory: true,
       });
       canvas.add(rubberLine);
+      updateLiveDim(last, ptr);
 
       if (points.length >= 2) {
         if (previewPoly) canvas.remove(previewPoly);
@@ -250,7 +393,12 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
         });
         previewLines.push(line);
         canvas.add(line);
+
+        const segLabel = makeSegmentDimLabel(prev, ptr, formatSegmentDimsAlways(getSegmentMetrics?.(prev, ptr)));
+        segmentDimLabels.push(segLabel);
+        canvas.add(segLabel);
       }
+      clearLiveDim();
       canvas.requestRenderAll();
     }
   };
@@ -272,6 +420,10 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
         const lastLine = previewLines.pop();
         canvas.remove(lastLine);
       }
+      if (segmentDimLabels.length) {
+        const lastSeg = segmentDimLabels.pop();
+        canvas.remove(lastSeg);
+      }
       points.pop();
       if (rubberLine) {
         canvas.remove(rubberLine);
@@ -281,6 +433,7 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
         canvas.remove(previewPoly);
         previewPoly = null;
       }
+      clearLiveDim();
       canvas.requestRenderAll();
     }
   };
@@ -294,18 +447,24 @@ export function enableZoneDraw(canvas, getPreset, onDone) {
     canvas.off("mouse:down", handler);
     canvas.off("mouse:move", handler);
     document.removeEventListener("keydown", keyHandler);
-    [...previewLines, ...vertexDots, rubberLine, previewPoly].filter(Boolean).forEach((o) => canvas.remove(o));
+    [...previewLines, ...vertexDots, ...segmentDimLabels, rubberLine, previewPoly, liveDimLabel]
+      .filter(Boolean)
+      .forEach((o) => canvas.remove(o));
     previewLines = [];
     vertexDots = [];
+    segmentDimLabels.length = 0;
     rubberLine = null;
     previewPoly = null;
+    liveDimLabel = null;
+    onDimPreview?.(null);
     points.length = 0;
     canvas.requestRenderAll();
   }
 
   function finish() {
     const preset = getPreset();
-    const zone = createZoneGroup([...points], preset);
+    const metrics = getMetrics?.([...points]) ?? null;
+    const zone = createZoneGroup([...points], preset, "", metrics);
     cleanup();
     canvas.add(zone);
     canvas.setActiveObject(zone);
