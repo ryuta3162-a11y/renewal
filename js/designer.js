@@ -729,7 +729,7 @@ function createZoneHookElement(preset, collapsed, isCustom) {
     : "";
 
   const guideBtn = preset.hasGuide
-    ? `<button type="button" class="btn btn-ghost btn-sm btn-block btn-online-lesson-guide">📱 利用の流れ（4画面）</button>`
+    ? `<button type="button" class="btn btn-ghost btn-sm btn-block btn-online-lesson-guide">📱 利用の流れ（5画面）</button>`
     : "";
 
   hook.innerHTML = `

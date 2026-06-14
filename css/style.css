@@ -615,6 +615,7 @@ body {
 .ol-modal-body { max-height: calc(90vh - 120px); overflow-y: auto; }
 .ol-intro { margin-bottom: 1rem; font-size: 0.8rem; line-height: 1.6; color: var(--muted); }
 .ol-intro strong { color: var(--text); }
+.ol-flow-line { font-size: 0.72rem; color: var(--text); margin: 0.35rem 0 0; }
 .ol-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
 .ol-tags span {
   font-size: 0.65rem; padding: 0.2rem 0.45rem; border-radius: 4px;
@@ -638,9 +639,17 @@ body {
 .ol-step-sub { font-size: 0.68rem; color: var(--muted); margin: 0.1rem 0 0; }
 .ol-step-fig {
   margin: 0; background: #fff; border-radius: 6px; overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border); position: relative;
 }
 .ol-step-fig img { width: 100%; height: auto; display: block; }
+.ol-step-fig-highlighted .ol-img-highlight {
+  position: absolute; border: 3px solid #e11d48; border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(225, 29, 72, 0.35);
+  pointer-events: none;
+}
+.ol-img-highlight-tr {
+  top: 7.5%; right: 3.5%; width: 18%; height: 6.5%;
+}
 .ol-step-points {
   margin: 0; padding-left: 1.1rem; font-size: 0.68rem; line-height: 1.55; color: var(--text);
 }
