@@ -7,6 +7,7 @@ export const DRAWINGS = [
   { id: "kyodo-17", name: "原本-17", file: "/drawings/kyodo-17.pdf", kind: "pdf" },
   { id: "gyotoku-1", name: "行徳-図面1", file: "/drawings/gyotoku-1.pdf", kind: "pdf" },
   { id: "gyotoku-2", name: "行徳-図面2", file: "/drawings/gyotoku-2.pdf", kind: "pdf" },
+  { id: "mito", name: "みと図面", file: "/drawings/mito.pdf", kind: "pdf", planWidthMm: 29080 },
   { id: "mito-1", name: "みと図面①", file: "/drawings/mito-1.pdf", kind: "pdf", planWidthMm: 29080 },
   { id: "mito-2", name: "みと図面②", file: "/drawings/mito-2.pdf", kind: "pdf", planWidthMm: 29080 },
   { id: "mito-3", name: "みと図面③", file: "/drawings/mito-3.pdf", kind: "pdf", planWidthMm: 29080 },
