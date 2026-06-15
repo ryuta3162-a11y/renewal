@@ -2,6 +2,8 @@ import { snapPoint, hexToRgba } from "./draw-tools.js";
 import {
   formatZoneSizeText,
   formatEdgeLength,
+  getZoneCanvasPoints,
+  computeZoneEdgeLengths,
 } from "./drawing-scale.js";
 
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
@@ -47,20 +49,6 @@ function polygonCentroid(points) {
     y += p.y;
   });
   return { x: x / points.length, y: y / points.length };
-}
-
-function localBBoxFromPolyPoints(points) {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  points.forEach((p) => {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  });
-  return { minX, minY, maxX, maxY };
 }
 
 function createDimMarker(kind) {
@@ -122,7 +110,7 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx) {
   const edges = computeZoneEdgeLengths(group, drawingImage, mmPerImagePx);
   const markers = syncEdgeDimMarkers(group, edges.length);
   const groupAngle = group.angle || 0;
-  const outwardPad = 11;
+  const outwardPad = 12 / Math.max(group.scaleX || 1, group.scaleY || 1, 0.25);
 
   edges.forEach((edge, i) => {
     const marker = markers[i];
@@ -142,6 +130,10 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx) {
       visible: edge.lengthM != null,
     });
   });
+  if (typeof group.triggerLayout === "function") {
+    group.triggerLayout();
+  }
+  group.setCoords();
   group.dirty = true;
 }
 
@@ -180,7 +172,7 @@ function fitZoneLabel(name, metrics, maxW) {
       lineHeight: 1.12,
       splitByGrapheme: true,
     });
-    if (tb.calcTextHeight() <= 88) return fs;
+    if (tb.calcTextHeight() <= 100) return fs;
   }
   return 7;
 }
@@ -200,7 +192,7 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
     }
   );
 
-  const labelW = Math.max(72, Math.min(200, poly.width || 120));
+  const labelW = Math.max(88, Math.min(240, poly.width || 140));
   const labelText = buildZoneLabelText(preset.name, metrics);
   const label = new fabric.Textbox(labelText, {
     width: labelW,
@@ -239,6 +231,7 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
 
   group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
   if (metrics) group._zoneMetrics = metrics;
+  if (typeof group.triggerLayout === "function") group.triggerLayout();
   return group;
 }
 

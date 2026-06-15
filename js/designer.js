@@ -1,4 +1,4 @@
-import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED } from "./constants.js";
+import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, DEFAULT_PLAN_WIDTH_MM } from "./constants.js";
 import {
   refreshProjects,
   setCachedProjects,
@@ -44,7 +44,6 @@ import {
   formatZoneSizeText,
   formatZoneSizeShort,
   formatScaleStatus,
-  formatSegmentDimsAlways,
   formatEdgeLength,
 } from "./drawing-scale.js";
 import {
@@ -180,6 +179,9 @@ function initCanvas() {
     if (e.target?.objectType === "drawing" && !drawingTransformBefore) {
       drawingTransformBefore = captureDrawingState(drawingImage);
     }
+    if (e.target?.objectType === "zone") {
+      refreshZoneOnCanvas(e.target, computeZoneMetricsFor(e.target));
+    }
     if (e.target) applyInteractiveControls(e.target);
     updatePropsLive();
   });
@@ -188,7 +190,12 @@ function initCanvas() {
       drawingTransformBefore = captureDrawingState(drawingImage);
     }
   });
-  canvas.on("object:moving", updatePropsLive);
+  canvas.on("object:moving", (e) => {
+    if (e.target?.objectType === "zone") {
+      refreshZoneOnCanvas(e.target, computeZoneMetricsFor(e.target));
+    }
+    updatePropsLive();
+  });
   canvas.on("object:rotating", updatePropsLive);
   canvas.on("selection:created", (e) => {
     e.selected?.forEach(applyInteractiveControls);
@@ -325,6 +332,7 @@ async function loadDrawing(id) {
     if (!currentMmPerImagePx) tryDefaultScale();
     refreshAllZoneMetrics();
     updateScaleUI();
+    if (currentMmPerImagePx) scheduleAutoSave();
     pushHistory(true);
     isRestoringHistory = false;
     applyMachinesVisibility();
@@ -483,6 +491,7 @@ async function reloadPage() {
   if (!currentMmPerImagePx) tryDefaultScale();
   refreshAllZoneMetrics();
   updateScaleUI();
+  if (currentMmPerImagePx) scheduleAutoSave();
   pushHistory(true);
   isRestoringHistory = false;
   setStatus(`${sheet.name} — ページ ${currentPage}`);
@@ -551,11 +560,21 @@ function hideDrawDimHud() {
 }
 
 function tryDefaultScale() {
-  if (currentMmPerImagePx || !drawingImage) return;
+  if (currentMmPerImagePx || !drawingImage?.width) return false;
   const sheet = getCurrentSheet(currentDrawingId);
-  if (sheet?.planWidthMm && drawingImage.width) {
-    currentMmPerImagePx = sheet.planWidthMm / drawingImage.width;
+  const planWidth = sheet?.planWidthMm ?? DEFAULT_PLAN_WIDTH_MM;
+  currentMmPerImagePx = planWidth / drawingImage.width;
+  return true;
+}
+
+function ensureDrawingScale() {
+  if (currentMmPerImagePx) return true;
+  const applied = tryDefaultScale();
+  if (applied) {
+    updateScaleUI();
+    scheduleAutoSave();
   }
+  return !!currentMmPerImagePx;
 }
 
 function updateScaleUI() {
@@ -1536,6 +1555,7 @@ function setTool(tool) {
     canvas.skipTargetFind = true;
     enableShapeDraw(tool);
   } else if (tool === "zone") {
+    ensureDrawingScale();
     canvas.selection = false;
     canvas.skipTargetFind = true;
     polygonCleanup = enableZoneDraw(
@@ -1547,11 +1567,13 @@ function setTool(tool) {
           setTool("select");
           return;
         }
+        ensureDrawingScale();
         pushHistory();
         applyInteractiveControls(zone);
         ensureZoneDimensionMarkers(zone);
         refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
         refreshZoneHooksList();
+        canvas.requestRenderAll();
         openZoneModal(zone);
         setTool("select");
       },
@@ -2063,6 +2085,7 @@ function restoreDesign(key) {
       canvas.requestRenderAll();
       applyMachinesVisibility();
       refreshZoneHooksList();
+      refreshAllZoneMetrics();
       isRestoringHistory = false;
       resolve();
     });

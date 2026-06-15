@@ -176,7 +176,7 @@ export function formatZoneSizeText(metrics) {
   const tsubo = metrics.areaTsubo.toFixed(2);
   const w = metrics.widthM.toFixed(1);
   const d = metrics.depthM.toFixed(1);
-  return `${m2}㎡ / ${tsubo}坪\n横 ${w}m　縦 ${d}m`;
+  return `${m2}㎡ (${tsubo}坪)\n横 ${w}m　縦 ${d}m`;
 }
 
 export function formatZoneSizeShort(metrics) {
