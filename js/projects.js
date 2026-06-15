@@ -1,4 +1,4 @@
-import { DRAWINGS, MASTER_PROJECT_ID, KUSHITA_PROJECT_ID, KUSHITA_DRAWINGS, STORAGE_PREFIX } from "./constants.js";
+import { DRAWINGS, MASTER_PROJECT_ID, STORAGE_PREFIX } from "./constants.js";
 
 const IMPORTED_KEY = STORAGE_PREFIX + "imported-proposals";
 let sharedManifest = null;
@@ -27,15 +27,6 @@ export function saveImportedProposals(list) {
   localStorage.setItem(IMPORTED_KEY, JSON.stringify(list));
 }
 
-export function getMasterProject() {
-  return {
-    id: MASTER_PROJECT_ID,
-    name: "原本",
-    type: "master",
-    sheets: DRAWINGS.map(mapDrawingToSheet),
-  };
-}
-
 function mapDrawingToSheet(d) {
   return {
     id: d.id,
@@ -47,13 +38,12 @@ function mapDrawingToSheet(d) {
   };
 }
 
-export function getKushitaProject() {
+export function getMasterProject() {
   return {
-    id: KUSHITA_PROJECT_ID,
-    name: "日下",
-    type: "shared",
-    author: "日下",
-    sheets: KUSHITA_DRAWINGS.map(mapDrawingToSheet),
+    id: MASTER_PROJECT_ID,
+    name: "原本",
+    type: "master",
+    sheets: DRAWINGS.map(mapDrawingToSheet),
   };
 }
 
@@ -79,7 +69,7 @@ export async function getAllProjects() {
       baseDrawing: s.baseDrawing,
     })),
   }));
-  return [getMasterProject(), getKushitaProject(), ...shared, ...imported];
+  return [getMasterProject(), ...shared, ...imported];
 }
 
 export function findProject(projectId) {
@@ -94,7 +84,7 @@ export async function refreshProjects() {
 }
 
 function getAllProjectsSync() {
-  return cachedProjects || [getMasterProject(), getKushitaProject()];
+  return cachedProjects || [getMasterProject()];
 }
 
 export function setCachedProjects(projects) {
@@ -102,7 +92,7 @@ export function setCachedProjects(projects) {
 }
 
 export function getCachedProjects() {
-  return cachedProjects || [getMasterProject(), getKushitaProject()];
+  return cachedProjects || [getMasterProject()];
 }
 
 export function getProjectSheets(projectId) {

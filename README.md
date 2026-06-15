@@ -46,6 +46,21 @@ renewal/
 └── drawings/          # 竣工図 PDF
 ```
 
+## 図面の追加（ファイル複製でOK）
+
+アプリ内のアップロードは不要です。次の3ステップだけで足せます。
+
+1. **PDFを複製** — `drawings/` にコピー（例: `kyodo-7.pdf` → `kushita-1.pdf`）
+2. **一覧に登録** — `js/constants.js` の `DRAWINGS` に1行追加
+
+```js
+{ id: "kushita-1", name: "日下 図面1", file: "/drawings/kushita-1.pdf", kind: "pdf", planWidthMm: 29080 },
+```
+
+3. **GitHub に push** — Vercel が自動デプロイ
+
+区画データは図面ごとに別保存されるので、原本-7 と 日下 図面1 は互いに干渉しません。
+
 ## パーツの追加
 
 `js/constants.js` の `EQUIPMENT` に項目を足すと、左パネルに新しいパーツが増えます。

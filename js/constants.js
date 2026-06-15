@@ -1,5 +1,4 @@
 export const MASTER_PROJECT_ID = "master";
-export const KUSHITA_PROJECT_ID = "kushita";
 
 export const STORAGE_PREFIX = "renewal-studio-";
 
@@ -10,6 +9,9 @@ export const DRAWINGS = [
   { id: "kyodo-7", name: "原本-7", file: "/drawings/kyodo-7.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "kyodo-8", name: "原本-8", file: "/drawings/kyodo-8.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "kyodo-9", name: "原本-9", file: "/drawings/kyodo-9.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "kushita-1", name: "日下 図面1", file: "/drawings/kushita-1.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "kushita-2", name: "日下 図面2", file: "/drawings/kushita-2.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "kushita-3", name: "日下 図面3", file: "/drawings/kushita-3.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "kyodo-17", name: "原本-17", file: "/drawings/kyodo-17.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "gyotoku-1", name: "行徳-図面1", file: "/drawings/gyotoku-1.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "gyotoku-2", name: "行徳-図面2", file: "/drawings/gyotoku-2.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
@@ -18,13 +20,6 @@ export const DRAWINGS = [
   { id: "mito-2", name: "みと図面②", file: "/drawings/mito-2.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "mito-3", name: "みと図面③", file: "/drawings/mito-3.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "mito-4", name: "みと図面④", file: "/drawings/mito-4.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-];
-
-/** 原本-7/8/9 を複製した日下案（区画データは原本と別保存） */
-export const KUSHITA_DRAWINGS = [
-  { id: "kushita-1", name: "日下 図面1", file: "/drawings/kushita-1.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "kushita-2", name: "日下 図面2", file: "/drawings/kushita-2.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "kushita-3", name: "日下 図面3", file: "/drawings/kushita-3.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
 ];
 
 /** false = マシンUI非表示（データファイルは残す） */
