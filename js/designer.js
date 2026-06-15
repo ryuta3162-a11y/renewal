@@ -274,7 +274,15 @@ function rebuildSheetSelect() {
   sel.onchange = () => switchDrawing(sel.value);
 }
 
+function cancelPendingAutoSave() {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+}
+
 async function switchProject(projectId) {
+  cancelPendingAutoSave();
   if (currentDrawingId) persistCurrent();
   currentProjectId = projectId;
   currentPage = 1;
@@ -296,6 +304,7 @@ function getSheetPdfFile(sheet, pageNum = currentPage) {
 }
 
 async function switchDrawing(id) {
+  cancelPendingAutoSave();
   if (currentDrawingId) persistCurrent();
   currentPage = 1;
   await loadDrawing(id);
@@ -319,6 +328,7 @@ async function loadSheetBackground(sheet) {
 async function loadDrawing(id) {
   const sheet = getCurrentSheet(id);
   if (!sheet) return;
+  cancelPendingAutoSave();
   setStatus("図面を読み込み中…");
   currentDrawingId = id;
   document.getElementById("drawing-select").value = id;
@@ -332,14 +342,16 @@ async function loadDrawing(id) {
     if (!currentMmPerImagePx) tryDefaultScale();
     refreshAllZoneMetrics();
     updateScaleUI();
-    if (currentMmPerImagePx) scheduleAutoSave();
-    pushHistory(true);
     isRestoringHistory = false;
     applyMachinesVisibility();
     refreshZoneHooksList();
+    persistCurrent();
+    pushHistory(true);
     const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
     setStatus(`${proj} / ${sheet.name} — ページ ${currentPage}`);
   } catch (err) {
+    isRestoringHistory = false;
+    cancelPendingAutoSave();
     setStatus("図面の読み込みに失敗しました");
     console.error(err);
   }
@@ -461,6 +473,7 @@ function updatePageUI() {
 
 document.getElementById("btn-prev-page").addEventListener("click", async () => {
   if (currentPage <= 1) return;
+  cancelPendingAutoSave();
   persistCurrent();
   currentPage--;
   await reloadPage();
@@ -468,6 +481,7 @@ document.getElementById("btn-prev-page").addEventListener("click", async () => {
 
 document.getElementById("btn-next-page").addEventListener("click", async () => {
   if (currentPage >= totalPages) return;
+  cancelPendingAutoSave();
   persistCurrent();
   currentPage++;
   await reloadPage();
@@ -476,6 +490,7 @@ document.getElementById("btn-next-page").addEventListener("click", async () => {
 async function reloadPage() {
   const sheet = getCurrentSheet(currentDrawingId);
   if (!sheet) return;
+  cancelPendingAutoSave();
   updatePageUI();
   isRestoringHistory = true;
   getUserObjects().forEach((o) => canvas.remove(o));
@@ -491,9 +506,9 @@ async function reloadPage() {
   if (!currentMmPerImagePx) tryDefaultScale();
   refreshAllZoneMetrics();
   updateScaleUI();
-  if (currentMmPerImagePx) scheduleAutoSave();
-  pushHistory(true);
   isRestoringHistory = false;
+  persistCurrent();
+  pushHistory(true);
   setStatus(`${sheet.name} — ページ ${currentPage}`);
 }
 
@@ -975,6 +990,7 @@ function setupZoneModal() {
     document.getElementById("zone-modal").close();
     editingZone = null;
     pushHistory();
+    persistCurrent();
     scheduleAutoSave();
     refreshZoneHooksList();
   });
@@ -1574,6 +1590,7 @@ function setTool(tool) {
         refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
         refreshZoneHooksList();
         canvas.requestRenderAll();
+        persistCurrent();
         openZoneModal(zone);
         setTool("select");
       },
@@ -2009,7 +2026,8 @@ function undo() {
 }
 
 function scheduleAutoSave() {
-  clearTimeout(autoSaveTimer);
+  if (isRestoringHistory) return;
+  cancelPendingAutoSave();
   autoSaveTimer = setTimeout(() => {
     persistCurrent();
     showAutoSaved();
@@ -2030,7 +2048,7 @@ function showAutoSaved() {
 }
 
 function persistCurrent() {
-  if (!currentDrawingId) return;
+  if (!currentDrawingId || isRestoringHistory) return;
   saveDesign(pageKey(), {
     objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
     viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
@@ -2051,25 +2069,31 @@ function restoreDesign(key) {
     const data = loadDesign(key);
     currentMmPerImagePx = data?.mmPerImagePx ?? null;
 
-    if (drawingImage) {
+    const placeDrawing = () => {
+      if (!drawingImage) return;
       if (data?.drawingTransform) {
         applySavedDrawingTransform(data.drawingTransform);
       } else {
         fitDrawing(false);
       }
-    }
+    };
 
     if (!data) {
+      placeDrawing();
       resolve();
       return;
     }
+
     if (data.viewport?.length === 6) {
       canvas.setViewportTransform(data.viewport);
     }
+
     if (!data.objects?.length) {
+      placeDrawing();
       resolve();
       return;
     }
+
     isRestoringHistory = true;
     fabric.util.enlivenObjects(data.objects, (objs) => {
       objs.forEach((o) => {
@@ -2082,6 +2106,7 @@ function restoreDesign(key) {
         canvas.add(o);
       });
       if (drawingImage) drawingImage.sendToBack();
+      placeDrawing();
       canvas.requestRenderAll();
       applyMachinesVisibility();
       refreshZoneHooksList();
