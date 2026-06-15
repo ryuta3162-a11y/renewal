@@ -32,6 +32,7 @@ export const ZONE_SERIALIZE_PROPS = [
   "zoneInstanceId",
   "zoneShowEdgeLengths",
   "zoneShowBBoxDims",
+  "zoneShowTsubo",
 ];
 
 export function getZoneStyle(color, opacity) {
@@ -245,7 +246,10 @@ export function updateZoneLabel(group, metrics = undefined) {
   const name = group.zoneName || "区画";
   const m = metrics !== undefined ? metrics : group._zoneMetrics ?? null;
   if (metrics !== undefined) group._zoneMetrics = metrics;
-  const labelOpts = { showBBoxDims: group.zoneShowBBoxDims !== false };
+  const labelOpts = {
+    showBBoxDims: group.zoneShowBBoxDims !== false,
+    showTsubo: group.zoneShowTsubo !== false,
+  };
   const labelW = Math.max(72, Math.min(200, (poly.width || 120) * (group.scaleX || 1)));
   label.set({
     text: buildZoneLabelText(name, m, labelOpts),

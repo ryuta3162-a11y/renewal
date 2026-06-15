@@ -174,7 +174,7 @@ export function formatZoneSizeText(metrics, opts = {}) {
   if (!metrics) return null;
   const m2 = metrics.areaM2.toFixed(2);
   const tsubo = metrics.areaTsubo.toFixed(2);
-  let text = `${m2}㎡ (${tsubo}坪)`;
+  let text = opts.showTsubo !== false ? `${m2}㎡ (${tsubo}坪)` : `${m2}㎡`;
   if (opts.showBBoxDims !== false) {
     const w = metrics.widthM.toFixed(1);
     const d = metrics.depthM.toFixed(1);

@@ -18,6 +18,7 @@ const SERIALIZE_PROPS = [
   "zoneInstanceId",
   "zoneShowEdgeLengths",
   "zoneShowBBoxDims",
+  "zoneShowTsubo",
 ];
 
 const LABEL_PAD = 5;

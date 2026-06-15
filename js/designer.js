@@ -2087,19 +2087,31 @@ function updatePropsLive() {
   document.getElementById("prop-rotation-val").textContent = `${Math.round(obj.angle || 0)}°`;
 }
 
+function zoneLabelOpts(zone) {
+  return {
+    showBBoxDims: zone.zoneShowBBoxDims !== false,
+    showTsubo: zone.zoneShowTsubo !== false,
+  };
+}
+
 function renderZoneDimToggles(zone) {
   const showEdges = zone.zoneShowEdgeLengths !== false;
   const showBBox = zone.zoneShowBBoxDims !== false;
+  const showTsubo = zone.zoneShowTsubo !== false;
   return `
     <div class="zone-dim-toggles">
       <p class="zone-dim-toggles-title">寸法表示（区画ごと）</p>
+      <label class="zone-dim-toggle">
+        <input type="checkbox" id="prop-zone-tsubo" ${showTsubo ? "checked" : ""} />
+        坪数
+      </label>
       <label class="zone-dim-toggle">
         <input type="checkbox" id="prop-zone-edge-lengths" ${showEdges ? "checked" : ""} />
         各辺の長さ (m)
       </label>
       <label class="zone-dim-toggle">
         <input type="checkbox" id="prop-zone-bbox-dims" ${showBBox ? "checked" : ""} />
-        横・縦（坪数の下）
+        横・縦
       </label>
     </div>
   `;
@@ -2108,6 +2120,7 @@ function renderZoneDimToggles(zone) {
 function bindZoneDimToggles(zone) {
   const onDimToggle = () => {
     zone.set({
+      zoneShowTsubo: document.getElementById("prop-zone-tsubo")?.checked ?? true,
       zoneShowEdgeLengths: document.getElementById("prop-zone-edge-lengths")?.checked ?? true,
       zoneShowBBoxDims: document.getElementById("prop-zone-bbox-dims")?.checked ?? true,
     });
@@ -2117,6 +2130,7 @@ function bindZoneDimToggles(zone) {
     scheduleAutoSave();
     updateProps();
   };
+  document.getElementById("prop-zone-tsubo")?.addEventListener("change", onDimToggle);
   document.getElementById("prop-zone-edge-lengths")?.addEventListener("change", onDimToggle);
   document.getElementById("prop-zone-bbox-dims")?.addEventListener("change", onDimToggle);
 }
@@ -2131,7 +2145,7 @@ function updateProps() {
     form.hidden = true;
     const metrics = z._zoneMetrics;
     const sizeBlock = metrics
-      ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics).replace("\n", " · "))}</p>`
+      ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(z)).replace("\n", " · "))}</p>`
       : `<p class="prop-meta" style="color:var(--muted)">サイズ: 縮尺未設定</p>`;
     content.innerHTML = `
       <p class="prop-type">区画 — 配置中</p>
@@ -2200,7 +2214,7 @@ function updateProps() {
     const memo = obj.zoneMemo?.trim();
     const metrics = obj._zoneMetrics;
     const sizeBlock = metrics
-      ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics).replace("\n", " · "))}</p>`
+      ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(obj)).replace("\n", " · "))}</p>`
       : `<p class="prop-meta" style="color:var(--muted)">サイズ: 縮尺未設定</p>`;
     content.innerHTML = `
       <p class="prop-type">区画</p>
