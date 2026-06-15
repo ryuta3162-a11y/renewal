@@ -25,9 +25,66 @@ export const DRAWINGS = [
 /** false = マシンUI非表示（データファイルは残す） */
 export const MACHINES_UI_ENABLED = false;
 
-export const DEFAULT_PARTS = [
-  { id: "preset-remove", label: "撤去", category: "マーク", w: 50, h: 50, fill: "rgba(220,38,38,0.15)", stroke: "#dc2626", mark: "✕" },
-  { id: "preset-keep", label: "残す", category: "マーク", w: 50, h: 50, fill: "rgba(22,163,74,0.15)", stroke: "#16a34a", mark: "○" },
+/** 取り壊し・移動などの記号パーツ（区画とは別） */
+export const MARKS_UI_ENABLED = true;
+
+/** リニューアル検討用マーク — 図面上にクリック配置 */
+export const MARK_PARTS = [
+  {
+    id: "mark-demolish",
+    label: "取り壊し",
+    category: "リニューアル",
+    w: 48,
+    h: 48,
+    fill: "rgba(185,28,28,0.22)",
+    stroke: "#dc2626",
+    mark: "✕",
+    markRole: "demolish",
+  },
+  {
+    id: "mark-build",
+    label: "制作",
+    category: "リニューアル",
+    w: 48,
+    h: 48,
+    fill: "rgba(37,99,235,0.18)",
+    stroke: "#2563eb",
+    mark: "＋",
+    markRole: "build",
+  },
+  {
+    id: "mark-move-from",
+    label: "移動元",
+    category: "リニューアル",
+    w: 56,
+    h: 44,
+    fill: "rgba(234,88,12,0.22)",
+    stroke: "#ea580c",
+    mark: "出",
+    markRole: "move-from",
+    usesIndex: true,
+  },
+  {
+    id: "mark-move-to",
+    label: "移動先",
+    category: "リニューアル",
+    w: 56,
+    h: 44,
+    fill: "rgba(124,58,237,0.22)",
+    stroke: "#7c3aed",
+    mark: "入",
+    markRole: "move-to",
+    linksIndex: true,
+  },
 ];
+
+export const DEFAULT_PARTS = [
+  { id: "preset-remove", label: "撤去", category: "マーク", w: 50, h: 50, fill: "rgba(220,38,38,0.15)", stroke: "#dc2626", mark: "✕", markRole: "demolish" },
+  { id: "preset-keep", label: "残す", category: "マーク", w: 50, h: 50, fill: "rgba(22,163,74,0.15)", stroke: "#16a34a", mark: "○", markRole: "keep" },
+];
+
+export function getMarkPaletteParts() {
+  return [...MARK_PARTS, ...DEFAULT_PARTS];
+}
 
 export const SNAP_GRID = 5;

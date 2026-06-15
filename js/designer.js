@@ -1,4 +1,4 @@
-import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, DEFAULT_PLAN_WIDTH_MM } from "./constants.js";
+import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, MARKS_UI_ENABLED, getMarkPaletteParts, DEFAULT_PLAN_WIDTH_MM } from "./constants.js";
 import {
   refreshProjects,
   setCachedProjects,
@@ -73,6 +73,7 @@ import {
   upgradePartGroup,
   getSerializeProps,
   createPartBox,
+  refreshMarkPartDisplay,
 } from "./objects.js";
 
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -128,6 +129,7 @@ async function init() {
   setupPropsForm();
   setupDrawStyle();
   setupZoneUI();
+  if (MARKS_UI_ENABLED) rebuildMarksPalette();
   setupKeyboard();
   if (MACHINES_UI_ENABLED) await rebuildPalette();
   await waitForLayout();
@@ -1328,6 +1330,87 @@ function setupProposalModal() {
   });
 }
 
+function isMarkPartDef(def) {
+  return !!(def?.mark || def?.markRole);
+}
+
+function canPlaceParts() {
+  return MACHINES_UI_ENABLED || MARKS_UI_ENABLED;
+}
+
+function allowsMarkPlacement() {
+  return MARKS_UI_ENABLED && pendingPart && isMarkPartDef(pendingPart);
+}
+
+function getNextMarkIndex() {
+  const used = new Set();
+  canvas?.getObjects().forEach((o) => {
+    if (o.objectType === "part" && o.partMarkRole === "move-from" && o.partMarkIndex) {
+      used.add(o.partMarkIndex);
+    }
+  });
+  for (let i = 0; i < 26; i++) {
+    const letter = String.fromCharCode(65 + i);
+    if (!used.has(letter)) return letter;
+  }
+  return String(used.size + 1);
+}
+
+function getMoveFromIndices() {
+  const indices = [];
+  canvas?.getObjects().forEach((o) => {
+    if (o.objectType === "part" && o.partMarkRole === "move-from" && o.partMarkIndex) {
+      if (!indices.includes(o.partMarkIndex)) indices.push(o.partMarkIndex);
+    }
+  });
+  return indices.sort();
+}
+
+function rebuildMarksPalette() {
+  const panel = document.getElementById("marks-panel");
+  if (panel) panel.hidden = !MARKS_UI_ENABLED;
+  const container = document.getElementById("marks-palette");
+  if (!container) return;
+  container.innerHTML = "";
+  getMarkPaletteParts().forEach((def) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "marks-item";
+    btn.dataset.partId = def.id;
+    btn.title = def.markRole === "move-from"
+      ? "移動元 — 自動で A,B,C… を付与"
+      : def.markRole === "move-to"
+        ? "移動先 — どの移動元へ入るか右パネルで指定"
+        : `${def.label} — 図面をクリックして配置`;
+    btn.innerHTML = `
+      <span class="marks-swatch" style="background:${def.fill};border-color:${def.stroke}">${esc(def.markRole === "move-from" ? "A" : def.markRole === "move-to" ? "→A" : def.mark || "●")}</span>
+      <span class="marks-label">${esc(def.label)}</span>
+    `;
+    btn.addEventListener("click", () => selectMarkPart(def));
+    container.appendChild(btn);
+  });
+  highlightSelectedMark();
+}
+
+function highlightSelectedMark() {
+  document.querySelectorAll(".marks-item").forEach((btn) => {
+    btn.classList.toggle("selected", pendingPart && btn.dataset.partId === pendingPart.id);
+  });
+}
+
+function selectMarkPart(def) {
+  if (!MARKS_UI_ENABLED) return;
+  pendingPart = { ...def };
+  setTool("place");
+  const hint = def.markRole === "move-from"
+    ? `「${def.label}」— クリックで配置（A,B,C…が自動付与）`
+    : def.markRole === "move-to"
+      ? `「${def.label}」— クリックで配置 → 右パネルで移動元を指定`
+      : `「${def.label}」— 図面をクリックして配置`;
+  flashStatus(hint);
+  highlightSelectedMark();
+}
+
 // ── Palette ─────────────────────────────────────────
 function getAllParts() {
   return [...getInventoryParts(), ...DEFAULT_PARTS, ...loadCustomParts()].map(attachImageToPart);
@@ -1498,7 +1581,13 @@ function onCanvasMouseDown(opt) {
     return;
   }
 
-  if (MACHINES_UI_ENABLED && activeTool === "place" && pendingPart && (!opt.target || opt.target?.objectType === "drawing")) {
+  if (allowsMarkPlacement() && activeTool === "place" && (!opt.target || opt.target?.objectType === "drawing")) {
+    const ptr = canvas.getPointer(e);
+    void placeMarkAt(ptr.x, ptr.y);
+    return;
+  }
+
+  if (MACHINES_UI_ENABLED && activeTool === "place" && pendingPart && !isMarkPartDef(pendingPart) && (!opt.target || opt.target?.objectType === "drawing")) {
     placeStart = canvas.getPointer(e);
     placePreview = new fabric.Rect({
       left: placeStart.x,
@@ -1581,22 +1670,41 @@ async function onCanvasMouseUp(opt) {
   }
 }
 
+async function placeMarkAt(x, y) {
+  if (!pendingPart) return;
+  await addPartToCanvas(pendingPart, x, y);
+  pushHistory();
+  scheduleAutoSave();
+  canvas.requestRenderAll();
+}
+
 async function addPartToCanvas(def, x, y, w, h) {
+  const partDef = { ...def };
+  if (partDef.markRole === "move-from") {
+    partDef.partMarkIndex = getNextMarkIndex();
+  } else if (partDef.markRole === "move-to") {
+    const sources = getMoveFromIndices();
+    partDef.partLinkIndex = sources.length === 1 ? sources[0] : sources[0] || "A";
+  }
+
   let obj;
-  if (def.mark) {
-    obj = createPartBox(
-      { ...def, label: def.mark, w: w ?? def.w, h: h ?? def.h },
-      x,
-      y,
-      w,
-      h
-    );
+  if (partDef.mark || partDef.markRole) {
+    obj = createPartBox(partDef, x, y, w ?? partDef.w, h ?? partDef.h);
+    if (partDef.markRole) {
+      obj.set({
+        partMarkRole: partDef.markRole,
+        partMarkIndex: partDef.partMarkIndex || "",
+        partLinkIndex: partDef.partLinkIndex || "",
+      });
+      refreshMarkPartDisplay(obj);
+    }
   } else {
-    obj = await placePart(def, x, y, w, h);
+    obj = await placePart(partDef, x, y, w, h);
   }
   canvas.add(obj);
   applyInteractiveControls(obj);
   canvas.setActiveObject(obj);
+  updateProps();
 }
 
 // ── Memo tooltip ────────────────────────────────────
@@ -1829,7 +1937,7 @@ function setTool(tool) {
       (metrics) => showDrawDimHud(metrics)
     );
     flashStatus(`「${pendingZonePreset.name}」— 角クリック → 始点/Enter で形を決定 → ドラッグ → Enter で固定`);
-  } else if (tool === "place" && MACHINES_UI_ENABLED) {
+  } else if (tool === "place" && canPlaceParts()) {
     canvas.selection = false;
     canvas.skipTargetFind = false;
   } else if (tool === "pan") {
@@ -1850,7 +1958,7 @@ function updateCanvasCursor() {
     canvas.setCursor("grab");
     return;
   }
-  if (MACHINES_UI_ENABLED && activeTool === "place") {
+  if (canPlaceParts() && activeTool === "place") {
     canvas.setCursor("crosshair");
     return;
   }
@@ -2279,6 +2387,77 @@ function updateProps() {
     return;
   }
 
+  if (obj.objectType === "part" && (obj.partMarkRole || obj._objects?.some((o) => o.type === "text" && (o.text === "✕" || o.text === "○")))) {
+    const role = obj.partMarkRole;
+    const roleNames = {
+      demolish: "取り壊し",
+      build: "制作",
+      "move-from": "移動元",
+      "move-to": "移動先",
+      keep: "残す",
+    };
+    const roleLabel = roleNames[role] || obj.partLabel || "記号";
+    let indexBlock = "";
+    if (role === "move-from") {
+      indexBlock = `
+        <label class="prop-field mini">インデックス（どのAか）
+          <input type="text" id="prop-mark-index" maxlength="3" placeholder="A" />
+        </label>
+        <p class="prop-meta prop-hint">同じ文字の <strong>移動先 →A</strong> と対応づけます</p>
+      `;
+    } else if (role === "move-to") {
+      const opts = getMoveFromIndices();
+      const options = (opts.length ? opts : ["A"])
+        .map((i) => `<option value="${esc(i)}">${esc(i)}</option>`)
+        .join("");
+      indexBlock = `
+        <label class="prop-field mini">どこの移動元へ
+          <select id="prop-mark-link">${options}</select>
+        </label>
+        <p class="prop-meta prop-hint">廃止した場所の代わりに<strong>どこへ詰めるか</strong>を指定</p>
+      `;
+    }
+    form.hidden = false;
+    content.innerHTML = `
+      <p class="prop-type">リニューアル記号</p>
+      <p class="prop-meta"><strong>${esc(roleLabel)}</strong></p>
+      ${indexBlock}
+      <p class="prop-meta prop-hint">ドラッグで位置調整 · 削除は下のボタン</p>
+    `;
+    document.getElementById("prop-label").closest(".prop-field").hidden = true;
+    document.querySelectorAll("#props-form .prop-row").forEach((row) => {
+      row.hidden = true;
+    });
+    document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
+    document.getElementById("prop-stroke").closest(".prop-field").hidden = false;
+    const rect = getPartBodyRect(obj);
+    document.getElementById("prop-fill").value = rgbToHex(rect?.fill) || "#fee2e2";
+    document.getElementById("prop-stroke").value = rgbToHex(rect?.stroke) || "#dc2626";
+    const idxInput = document.getElementById("prop-mark-index");
+    if (idxInput) {
+      idxInput.value = obj.partMarkIndex || "";
+      idxInput.addEventListener("change", (e) => {
+        obj.set({ partMarkIndex: e.target.value.trim().toUpperCase() });
+        refreshMarkPartDisplay(obj);
+        canvas.requestRenderAll();
+        pushHistory();
+        scheduleAutoSave();
+      });
+    }
+    const linkSel = document.getElementById("prop-mark-link");
+    if (linkSel) {
+      linkSel.value = obj.partLinkIndex || linkSel.value;
+      linkSel.addEventListener("change", (e) => {
+        obj.set({ partLinkIndex: e.target.value });
+        refreshMarkPartDisplay(obj);
+        canvas.requestRenderAll();
+        pushHistory();
+        scheduleAutoSave();
+      });
+    }
+    return;
+  }
+
   if (obj.objectType === "part") {
     form.hidden = true;
     content.innerHTML = `
@@ -2415,11 +2594,12 @@ function restoreDesign(key, data = loadDesign(key), opts = {}) {
   });
 }
 
-function applyMachinesVisibility() {
+function applyPartVisibility() {
   if (!canvas) return;
   canvas.getObjects().forEach((o) => {
     if (o.objectType !== "part") return;
-    const show = MACHINES_UI_ENABLED;
+    const isMark = !!o.partMarkRole || o._objects?.some((c) => c.type === "text" && (c.text === "✕" || c.text === "○"));
+    const show = isMark ? MARKS_UI_ENABLED : MACHINES_UI_ENABLED;
     o.set({
       visible: show,
       evented: show,
@@ -2427,6 +2607,10 @@ function applyMachinesVisibility() {
     });
   });
   canvas.requestRenderAll();
+}
+
+function applyMachinesVisibility() {
+  applyPartVisibility();
 }
 
 function exportPng() {

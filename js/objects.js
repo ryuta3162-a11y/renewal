@@ -10,6 +10,9 @@ const SERIALIZE_PROPS = [
   "partImageMode",
   "imageUrl",
   "imageHasLabel",
+  "partMarkRole",
+  "partMarkIndex",
+  "partLinkIndex",
   "zoneName",
   "zoneMemo",
   "zoneColor",
@@ -131,6 +134,9 @@ function basePartProps(def, x, y) {
     partId: def.id,
     partLabel: def.label,
     partCategory: def.category,
+    partMarkRole: def.markRole || "",
+    partMarkIndex: def.partMarkIndex || "",
+    partLinkIndex: def.partLinkIndex || "",
     realWidthMm: def.realWidthMm || "",
     realHeightMm: def.realHeightMm || "",
     inventoryCount: def.count || null,
@@ -140,6 +146,32 @@ function basePartProps(def, x, y) {
     imageUrl: def.imageUrl || "",
     partImageMode: false,
   };
+}
+
+export function getMarkDisplayText(groupOrDef) {
+  const role = groupOrDef.partMarkRole || groupOrDef.markRole;
+  const mark = groupOrDef.mark;
+  if (role === "move-from") return groupOrDef.partMarkIndex || "?";
+  if (role === "move-to") return `→${groupOrDef.partLinkIndex || "?"}`;
+  return mark || "●";
+}
+
+export function refreshMarkPartDisplay(group) {
+  if (group.objectType !== "part") return;
+  const textObj = group._objects?.find((o) => o.type === "text" && o !== group._objects?.[0]);
+  if (!textObj) return;
+  const body = getPartBodyRect(group);
+  const role = group.partMarkRole;
+  if (role === "move-from" || role === "move-to") {
+    textObj.set({
+      text: getMarkDisplayText(group),
+      fontSize: role === "move-from" ? 22 : 17,
+      fill: body?.stroke || "#0f172a",
+      fontWeight: "800",
+    });
+  }
+  group.dirty = true;
+  group.setCoords();
 }
 
 export function reflowPartLabel(group) {
@@ -332,9 +364,13 @@ export function createPartBox(def, x, y, w, h) {
   }
 
   if (def.mark) {
+    const display = def.markRole === "move-from" || def.markRole === "move-to"
+      ? getMarkDisplayText(def)
+      : def.mark;
+    const fontSize = def.markRole === "move-from" ? 22 : def.markRole === "move-to" ? 17 : def.mark === "✕" ? 26 : 20;
     objects.push(
-      new fabric.Text(def.mark, {
-        fontSize: def.mark === "✕" ? 26 : 20,
+      new fabric.Text(display, {
+        fontSize,
         fill: def.stroke,
         fontWeight: "bold",
         originX: "center",
@@ -362,6 +398,19 @@ export async function placePart(def, x, y, w, h) {
 
 export function upgradePartGroup(group) {
   if (group.objectType !== "part") return;
+  if (!group.partMarkRole) {
+    if (group.partId === "preset-remove" || group.partId === "mark-demolish") {
+      group.set({ partMarkRole: "demolish" });
+    } else if (group.partId === "preset-keep") {
+      group.set({ partMarkRole: "keep" });
+    } else if (group.partId === "mark-build") {
+      group.set({ partMarkRole: "build" });
+    } else if (group.partId === "mark-move-from") {
+      group.set({ partMarkRole: "move-from" });
+    } else if (group.partId === "mark-move-to") {
+      group.set({ partMarkRole: "move-to" });
+    }
+  }
   const body = getPartBodyRect(group);
   if (body) {
     body.set({ rx: 0, ry: 0 });
@@ -375,9 +424,12 @@ export function upgradePartGroup(group) {
   });
   applyInteractiveControls(group);
   const isMark = group._objects?.some(
-    (o) => o.type === "text" && (o.text === "✕" || o.text === "○")
+    (o) => o.type === "text" && (o.text === "✕" || o.text === "○" || group.partMarkRole)
   );
-  if (isMark) return;
+  if (isMark) {
+    refreshMarkPartDisplay(group);
+    return;
+  }
   if (group.partImageMode) return;
   if (group._objects?.some((o) => o.type === "textbox")) return;
   normalizePartAfterResize(group);
