@@ -8,7 +8,14 @@ export async function pdfToDataUrl(url, pageNum = 1, scale = 2) {
   try {
     doc = await pdfjsLib.getDocument(url).promise;
   } catch (err) {
-    throw new Error(`PDFを開けませんでした (${url}): ${err?.message || err}`);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = await res.arrayBuffer();
+      doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    } catch (err2) {
+      throw new Error(`PDFを開けませんでした (${url}): ${err2?.message || err?.message || err}`);
+    }
   }
   const safePage = Math.min(Math.max(1, pageNum), doc.numPages);
   const page = await doc.getPage(safePage);

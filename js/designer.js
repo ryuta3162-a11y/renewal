@@ -275,17 +275,43 @@ function resizeCanvas() {
   canvas.requestRenderAll();
 }
 
+function resetViewport() {
+  canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+}
+
+function isValidViewport(vpt) {
+  if (!vpt || vpt.length !== 6) return false;
+  const [a, , , d, e, f] = vpt;
+  if (![a, d, e, f].every(Number.isFinite)) return false;
+  if (a < 0.08 || a > 12 || d < 0.08 || d > 12) return false;
+  if (Math.abs(e) > 50000 || Math.abs(f) > 50000) return false;
+  return true;
+}
+
+function ensureDrawingVisible() {
+  if (!drawingImage) return;
+  if (!isDrawingOnScreen(drawingImage, canvas)) {
+    resetViewport();
+    fitDrawing(false);
+    canvas.requestRenderAll();
+  }
+}
+
 function placeDrawingOnCanvas(savedTransform) {
   if (!drawingImage) return;
   if (savedTransform && isValidDrawingTransform(savedTransform)) {
     applySavedDrawingTransform(savedTransform);
-    if (!isDrawingOnScreen(drawingImage, canvas)) {
-      fitDrawing(false);
-    }
   } else {
     fitDrawing(false);
   }
+  ensureDrawingVisible();
   canvas.requestRenderAll();
+}
+
+function applySavedViewport(vpt) {
+  if (!vpt || !isValidViewport(vpt)) return;
+  canvas.setViewportTransform(vpt);
+  ensureDrawingVisible();
 }
 
 // ── Projects & sheets ───────────────────────────────
@@ -393,9 +419,10 @@ async function loadDrawing(id) {
     resizeCanvas();
     const saved = loadDesign(pageKey());
     await loadSheetBackground(sheet);
-    await restoreDesign(pageKey(), saved);
     resizeCanvas();
     placeDrawingOnCanvas(saved?.drawingTransform);
+    await restoreDesign(pageKey(), saved, { skipViewport: true });
+    applySavedViewport(saved?.viewport);
     if (!currentMmPerImagePx) tryDefaultScale();
     refreshAllZoneMetrics();
     updateScaleUI();
@@ -419,11 +446,18 @@ async function loadDrawing(id) {
 
 function loadDrawingImage(dataUrl) {
   return new Promise((resolve, reject) => {
+    const loadOpts = dataUrl.startsWith("data:") ? undefined : { crossOrigin: "anonymous" };
     fabric.Image.fromURL(
       dataUrl,
       (img) => {
         if (!img) {
-          reject(new Error("image load failed"));
+          reject(new Error("図面画像の読み込みに失敗しました"));
+          return;
+        }
+        const iw = img.width || img._element?.naturalWidth || 0;
+        const ih = img.height || img._element?.naturalHeight || 0;
+        if (iw < 1 || ih < 1) {
+          reject(new Error("図面画像のサイズが0です（PDFの変換に失敗した可能性）"));
           return;
         }
         img.set({
@@ -438,7 +472,7 @@ function loadDrawingImage(dataUrl) {
         configureDrawingResize(img, activeTool === "select");
         resolve(img);
       },
-      { crossOrigin: "anonymous" }
+      loadOpts
     );
   });
 }
@@ -567,10 +601,11 @@ async function reloadPage() {
     const pdf = await pdfToDataUrl(getSheetPdfFile(sheet), 1, 2);
     await loadDrawingImage(pdf.dataUrl);
   }
-  await restoreDesign(pageKey());
-  resizeCanvas();
   const saved = loadDesign(pageKey());
+  resizeCanvas();
   placeDrawingOnCanvas(saved?.drawingTransform);
+  await restoreDesign(pageKey(), saved, { skipViewport: true });
+  applySavedViewport(saved?.viewport);
   if (!currentMmPerImagePx) tryDefaultScale();
   refreshAllZoneMetrics();
   updateScaleUI();
@@ -2288,7 +2323,7 @@ function persistCurrent() {
   });
 }
 
-function restoreDesign(key, data = loadDesign(key)) {
+function restoreDesign(key, data = loadDesign(key), opts = {}) {
   return new Promise((resolve) => {
     currentMmPerImagePx = data?.mmPerImagePx ?? null;
 
@@ -2297,8 +2332,8 @@ function restoreDesign(key, data = loadDesign(key)) {
       return;
     }
 
-    if (data.viewport?.length === 6) {
-      canvas.setViewportTransform(data.viewport);
+    if (!opts.skipViewport && data.viewport?.length === 6) {
+      applySavedViewport(data.viewport);
     }
 
     if (!data.objects?.length) {

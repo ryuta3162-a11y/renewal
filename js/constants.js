@@ -19,8 +19,6 @@ export const DRAWINGS = [
   { id: "mito-4", name: "みと図面④", file: "/drawings/mito-4.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
 ];
 
-export const STORAGE_PREFIX = "renewal-studio-";
-
 /** false = マシンUI非表示（データファイルは残す） */
 export const MACHINES_UI_ENABLED = false;
 
