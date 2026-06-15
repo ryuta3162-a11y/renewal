@@ -368,6 +368,42 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
+.zone-place-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem 0.5rem;
+  max-width: min(96%, 640px);
+  padding: 0.5rem 0.75rem;
+  background: rgba(15, 23, 42, 0.96);
+  border: 2px solid #f59e0b;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  color: var(--text);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+.zone-place-hud[hidden] { display: none !important; }
+.zone-place-step { color: var(--muted); white-space: nowrap; }
+.zone-place-step.active { color: #fcd34d; font-weight: 700; }
+.zone-place-arrow { color: var(--muted); opacity: 0.6; }
+.zone-place-hud kbd {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid #64748b;
+  border-radius: 4px;
+  background: #1e293b;
+  font-size: 0.72rem;
+  font-family: inherit;
+}
+.zone-place-confirm { margin-left: 0.25rem; }
+.canvas-wrap.placing-zone .upper-canvas { cursor: move !important; }
+
 .modal-compact { max-width: 300px; }
 .modal-compact .modal-body { padding: 0.75rem 1rem 1rem; }
 .zone-action-memo {
@@ -561,6 +597,7 @@ body {
 .props-empty { font-size: 0.75rem; color: var(--muted); line-height: 1.6; margin-bottom: 0.75rem; }
 .prop-type { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.2rem; }
 .prop-meta { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.15rem; }
+.prop-hint { font-size: 0.72rem; line-height: 1.55; color: var(--muted); margin: 0.2rem 0 0.35rem; }
 
 .prop-field {
   display: block; font-size: 0.68rem; color: var(--muted); font-weight: 600;

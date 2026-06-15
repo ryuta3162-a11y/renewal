@@ -99,6 +99,15 @@
           <div id="memo-tooltip" class="memo-tooltip" hidden></div>
           <div id="zone-tooltip" class="zone-tooltip" hidden></div>
           <div id="draw-dim-hud" class="draw-dim-hud" hidden>横 — 縦 —</div>
+          <div id="zone-place-hud" class="zone-place-hud" hidden>
+            <span class="zone-place-step">① 形を決めた</span>
+            <span class="zone-place-arrow">→</span>
+            <span class="zone-place-step active">② ドラッグで位置調整</span>
+            <span class="zone-place-arrow">→</span>
+            <span class="zone-place-step"><kbd>Enter</kbd> で固定</span>
+            <button type="button" class="btn btn-primary btn-xs zone-place-confirm" id="btn-zone-place-confirm">Enter で固定</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-zone-place-cancel">Esc 取消</button>
+          </div>
         </div>
         <footer id="status" class="status-bar">準備中… — 変更は自動保存されます</footer>
       </div>
@@ -148,9 +157,9 @@
             <li>上部<strong>自作区分</strong>で名称・色を登録（ブラウザに保存）</li>
             <li>標準区分も<strong>同一名称で何個でも</strong>区画を追加可</li>
             <li>左の<strong>区分フック</strong>を開いて区画を描く</li>
-            <li><strong>⬡区画</strong>：角をクリックして線で囲む</li>
-            <li>始点クリック / <strong>Enter</strong> で確定、<strong>Backspace</strong> で1点戻す</li>
-            <li><strong>右クリック / Esc</strong> で描画中の区画をやめる</li>
+            <li><strong>⬡区画</strong>：角をクリック → 始点 or <strong>Enter</strong> で形を決定</li>
+            <li>形が決まったら<strong>ドラッグで位置調整</strong> → <strong>Enter</strong> で固定</li>
+            <li><strong>Esc</strong> で配置取消 · <strong>Backspace</strong> で1点戻す（描画中）</li>
             <li>区画を<strong>クリック</strong> → 修正 or 削除を選択</li>
             <li><strong>↖ 選択</strong>で図面をクリック → 四隅ドラッグでサイズ変更（区画も連動）</li>
             <li>描画中・確定後とも<strong>各辺の長さ (m)</strong>を表示</li>

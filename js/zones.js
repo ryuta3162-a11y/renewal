@@ -314,6 +314,44 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
   let previewPoly = null;
   let liveDimLabel = null;
   const segmentDimLabels = [];
+  let lastClickAt = 0;
+
+  function closeScreenPx() {
+    return 26 / (canvas.getZoom() || 1);
+  }
+
+  function isNearFirstPoint(raw, first) {
+    const d = Math.hypot(raw.x - first.x, raw.y - first.y);
+    return d < closeScreenPx();
+  }
+
+  function highlightCloseTarget() {
+    if (vertexDots.length && points.length >= 3) {
+      const preset = getPreset();
+      const style = getZoneStyle(preset.color, preset.opacity);
+      vertexDots[0].set({
+        width: 16,
+        height: 16,
+        fill: style.guideStroke,
+        stroke: "#fff",
+        strokeWidth: 3,
+      });
+    }
+  }
+
+  function resetCloseTarget() {
+    if (vertexDots.length) {
+      const preset = getPreset();
+      const style = getZoneStyle(preset.color, preset.opacity);
+      vertexDots[0].set({
+        width: 8,
+        height: 8,
+        fill: style.guideStroke,
+        stroke: style.guideStroke,
+        strokeWidth: 2,
+      });
+    }
+  }
 
   function updateLiveDim(a, b) {
     const metrics = getSegmentMetrics?.(a, b) ?? null;
@@ -339,7 +377,8 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
 
   const handler = (opt) => {
     const e = opt.e;
-    const ptr = snapPoint(canvas.getPointer(e), canvas, e);
+    const raw = canvas.getPointer(e);
+    const ptr = snapPoint(raw, canvas, e);
     const preset = getPreset();
     const style = getZoneStyle(preset.color, preset.opacity);
 
@@ -389,14 +428,15 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
     }
 
     if (e.type === "mousedown" && e.button === 0) {
-      if (points.length >= 3) {
-        const first = points[0];
-        const closeDist = 14 / (canvas.getZoom() || 1);
-        if (Math.hypot(ptr.x - first.x, ptr.y - first.y) < closeDist) {
-          finish();
-          return;
-        }
+      const now = Date.now();
+      const isDouble = now - lastClickAt < 350;
+      lastClickAt = now;
+
+      if (points.length >= 3 && (isDouble || isNearFirstPoint(raw, points[0]))) {
+        finish();
+        return;
       }
+
       points.push(ptr);
       const dot = new fabric.Rect({
         left: ptr.x,
@@ -434,7 +474,16 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
         canvas.add(segLabel);
       }
       clearLiveDim();
+      if (points.length >= 3) highlightCloseTarget();
       canvas.requestRenderAll();
+    }
+  };
+
+  const dblHandler = (opt) => {
+    if (opt.e?.button !== 0) return;
+    if (points.length >= 3) {
+      opt.e.preventDefault?.();
+      finish();
     }
   };
 
@@ -469,6 +518,8 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
         previewPoly = null;
       }
       clearLiveDim();
+      if (points.length >= 3) highlightCloseTarget();
+      else resetCloseTarget();
       canvas.requestRenderAll();
     }
   };
@@ -481,6 +532,7 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
   function cleanup() {
     canvas.off("mouse:down", handler);
     canvas.off("mouse:move", handler);
+    canvas.off("mouse:dblclick", dblHandler);
     document.removeEventListener("keydown", keyHandler);
     [...previewLines, ...vertexDots, ...segmentDimLabels, rubberLine, previewPoly, liveDimLabel]
       .filter(Boolean)
@@ -497,9 +549,12 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
   }
 
   function finish() {
+    if (points.length < 3) return;
+    resetCloseTarget();
     const preset = getPreset();
     const metrics = getMetrics?.([...points]) ?? null;
     const zone = createZoneGroup([...points], preset, "", metrics);
+    zone._skipHistory = true;
     cleanup();
     canvas.add(zone);
     canvas.setActiveObject(zone);
@@ -508,6 +563,7 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
 
   canvas.on("mouse:down", handler);
   canvas.on("mouse:move", handler);
+  canvas.on("mouse:dblclick", dblHandler);
   document.addEventListener("keydown", keyHandler);
 
   return cleanup;

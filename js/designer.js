@@ -88,6 +88,7 @@ let totalPages = 1;
 let polygonCleanup = null;
 let activeTool = "zone";
 let pendingZonePreset = ZONE_PRESETS[0];
+let pendingPlacementZone = null;
 let pendingPart = null;
 let isPanning = false;
 let spaceDown = false;
@@ -153,6 +154,10 @@ function initCanvas() {
     if (e.target?.objectType === "zone") {
       refreshZoneOnCanvas(e.target, computeZoneMetricsFor(e.target));
       refreshZoneHooksList();
+      if (e.target._zonePendingFix) {
+        updateProps();
+        return;
+      }
     }
     if (e.target) applyInteractiveControls(e.target);
     pushHistory();
@@ -196,16 +201,27 @@ function initCanvas() {
     }
     updatePropsLive();
   });
-  canvas.on("object:rotating", updatePropsLive);
   canvas.on("selection:created", (e) => {
+    if (pendingPlacementZone && e.selected?.[0] !== pendingPlacementZone) {
+      canvas.setActiveObject(pendingPlacementZone);
+    }
     e.selected?.forEach(applyInteractiveControls);
     updateProps();
   });
   canvas.on("selection:updated", (e) => {
+    if (pendingPlacementZone && e.selected?.[0] !== pendingPlacementZone) {
+      canvas.setActiveObject(pendingPlacementZone);
+    }
     e.selected?.forEach(applyInteractiveControls);
     updateProps();
   });
-  canvas.on("selection:cleared", updateProps);
+  canvas.on("selection:cleared", () => {
+    if (pendingPlacementZone) {
+      canvas.setActiveObject(pendingPlacementZone);
+      return;
+    }
+    updateProps();
+  });
   canvas.on("mouse:over", onObjectHover);
   canvas.on("mouse:out", onObjectOut);
 
@@ -283,6 +299,7 @@ function cancelPendingAutoSave() {
 
 async function switchProject(projectId) {
   cancelPendingAutoSave();
+  if (!discardPendingPlacementIfNeeded("案を切り替える")) return;
   if (currentDrawingId) persistCurrent();
   currentProjectId = projectId;
   currentPage = 1;
@@ -305,6 +322,7 @@ function getSheetPdfFile(sheet, pageNum = currentPage) {
 
 async function switchDrawing(id) {
   cancelPendingAutoSave();
+  if (!discardPendingPlacementIfNeeded("図面を切り替える")) return;
   if (currentDrawingId) persistCurrent();
   currentPage = 1;
   await loadDrawing(id);
@@ -334,6 +352,8 @@ async function loadDrawing(id) {
   document.getElementById("drawing-select").value = id;
   try {
     isRestoringHistory = true;
+    pendingPlacementZone = null;
+    showPlacementHud(false);
     canvas.clear();
     drawingImage = null;
     polygonCleanup = null;
@@ -435,7 +455,9 @@ function applySavedDrawingTransform(t) {
 }
 
 function getUserObjects() {
-  return canvas.getObjects().filter((o) => o.objectType !== "drawing");
+  return canvas.getObjects().filter(
+    (o) => o.objectType !== "drawing" && !o._zonePendingFix
+  );
 }
 
 function snapshotUserObjects() {
@@ -492,6 +514,8 @@ async function reloadPage() {
   if (!sheet) return;
   cancelPendingAutoSave();
   updatePageUI();
+  pendingPlacementZone = null;
+  showPlacementHud(false);
   isRestoringHistory = true;
   getUserObjects().forEach((o) => canvas.remove(o));
   if (drawingImage) canvas.remove(drawingImage);
@@ -529,6 +553,9 @@ function setupZoneUI() {
   setupCustomPresetModal();
   setupScaleUI();
 
+  document.getElementById("btn-zone-place-confirm")?.addEventListener("click", confirmZonePlacement);
+  document.getElementById("btn-zone-place-cancel")?.addEventListener("click", cancelZonePlacement);
+
   document.getElementById("btn-hooks-expand-all")?.addEventListener("click", () => {
     setAllHooksCollapsed(false);
   });
@@ -546,6 +573,127 @@ function setupZoneUI() {
 
 function refreshZoneOnCanvas(zone, metrics) {
   refreshZoneDisplay(zone, metrics, drawingImage, currentMmPerImagePx);
+}
+
+function showPlacementHud(show) {
+  const hud = document.getElementById("zone-place-hud");
+  if (hud) hud.hidden = !show;
+  canvasWrap?.classList.toggle("placing-zone", !!show);
+}
+
+function enterZonePlacementMode(zone) {
+  if (!zone) return;
+  if (pendingPlacementZone && pendingPlacementZone !== zone) {
+    confirmZonePlacement();
+  }
+  pendingPlacementZone = zone;
+  zone._zonePendingFix = true;
+  zone._skipHistory = true;
+  zone.set({
+    hasControls: true,
+    hasBorders: true,
+    lockScaling: true,
+    lockRotation: true,
+    lockScalingX: true,
+    lockScalingY: true,
+    lockSkewingX: true,
+    lockSkewingY: true,
+    borderColor: "#f59e0b",
+    borderDashArray: [8, 4],
+    cornerColor: "#f59e0b",
+    cornerStrokeColor: "#fff",
+    hoverCursor: "move",
+  });
+  applyInteractiveControls(zone);
+  ensureDrawingScale();
+  ensureZoneDimensionMarkers(zone);
+  refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+  activeTool = "select";
+  document.querySelectorAll("[data-tool]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tool === "select");
+  });
+  canvas.isDrawingMode = false;
+  canvas.selection = true;
+  canvas.skipTargetFind = false;
+  canvas.setActiveObject(zone);
+  showPlacementHud(true);
+  hideDrawDimHud();
+  updateCanvasCursor();
+  updateDrawingInteractivity();
+  updateProps();
+  canvas.requestRenderAll();
+  flashStatus(`「${zone.zoneName || "区画"}」— ドラッグで位置調整 → Enter で固定`);
+}
+
+function confirmZonePlacement() {
+  const zone = pendingPlacementZone;
+  if (!zone) return;
+  pendingPlacementZone = null;
+  delete zone._zonePendingFix;
+  delete zone._skipHistory;
+  zone.set({
+    borderColor: "#60a5fa",
+    borderDashArray: null,
+    cornerColor: "#ffffff",
+    cornerStrokeColor: "#3b82f6",
+    lockScaling: false,
+    lockRotation: false,
+    lockScalingX: false,
+    lockScalingY: false,
+    lockSkewingX: false,
+    lockSkewingY: false,
+  });
+  applyInteractiveControls(zone);
+  showPlacementHud(false);
+  finalizeNewZone(zone);
+  updateProps();
+}
+
+function cancelZonePlacement() {
+  const zone = pendingPlacementZone;
+  if (!zone) return;
+  pendingPlacementZone = null;
+  showPlacementHud(false);
+  hideDrawDimHud();
+  canvas.remove(zone);
+  canvas.discardActiveObject();
+  refreshZoneHooksList();
+  updateProps();
+  canvas.requestRenderAll();
+  flashStatus("区画の配置を取消しました");
+}
+
+function discardPendingPlacementIfNeeded(actionLabel) {
+  if (!pendingPlacementZone) return true;
+  if (!confirm(`配置中の区画があります。${actionLabel}すると破棄されます。よろしいですか？`)) {
+    return false;
+  }
+  cancelZonePlacement();
+  return true;
+}
+
+function finalizeNewZone(zone) {
+  if (!zone) return;
+  try {
+    ensureDrawingScale();
+    applyInteractiveControls(zone);
+    ensureZoneDimensionMarkers(zone);
+    refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+    refreshZoneHooksList();
+    canvas.requestRenderAll();
+    persistCurrent();
+    pushHistory();
+    scheduleAutoSave();
+    const name = zone.zoneName || "区画";
+    if (currentMmPerImagePx) {
+      flashStatus(`「${name}」を固定しました（各辺の長さ・㎡を表示）`);
+    } else {
+      flashStatus(`「${name}」を固定しました — 左パネルで縮尺を設定するとサイズが出ます`);
+    }
+  } catch (err) {
+    console.error(err);
+    flashStatus("区画は追加しましたが表示更新でエラーがありました");
+  }
 }
 
 function computeZoneMetricsFor(zone) {
@@ -957,6 +1105,7 @@ function resolveZonePresetId(zone, allPresets = getAllZonePresets()) {
 }
 
 function selectZonePreset(preset, startDraw = true) {
+  if (pendingPlacementZone) confirmZonePlacement();
   pendingZonePreset = preset;
   highlightZonePreset();
   updateZoneActiveLabel();
@@ -980,7 +1129,10 @@ function setupZoneModal() {
     e.preventDefault();
     const name = document.getElementById("zone-name").value.trim();
     const memo = document.getElementById("zone-memo").value.trim();
-    if (!name) return;
+    if (!name) {
+      flashStatus("エリア名を入力してください");
+      return;
+    }
 
     if (editingZone) {
       editingZone.set({ zoneName: name, zoneMemo: memo });
@@ -1218,6 +1370,10 @@ function highlightSelectedPart() {
 }
 
 function cancelZoneDrawing() {
+  if (pendingPlacementZone) {
+    cancelZonePlacement();
+    return;
+  }
   if (polygonCleanup) {
     polygonCleanup();
     polygonCleanup = null;
@@ -1551,6 +1707,10 @@ function setupToolbar() {
 }
 
 function setTool(tool) {
+  if (pendingPlacementZone && tool !== "select") {
+    flashStatus("Enter で固定するか Esc で取消してください");
+    return;
+  }
   activeTool = tool;
   disableShapeDraw();
   document.querySelectorAll("[data-tool]").forEach((b) => {
@@ -1583,22 +1743,13 @@ function setTool(tool) {
           setTool("select");
           return;
         }
-        ensureDrawingScale();
-        pushHistory();
-        applyInteractiveControls(zone);
-        ensureZoneDimensionMarkers(zone);
-        refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
-        refreshZoneHooksList();
-        canvas.requestRenderAll();
-        persistCurrent();
-        openZoneModal(zone);
-        setTool("select");
+        enterZonePlacementMode(zone);
       },
       (points) => computeZoneMetricsFromCanvasPoints(points, drawingImage, currentMmPerImagePx),
       (a, b) => segmentMetrics(a, b, drawingImage, currentMmPerImagePx),
       (metrics) => showDrawDimHud(metrics)
     );
-    flashStatus(`「${pendingZonePreset.name}」— 角クリックで囲む / 右クリック・Escでやめる`);
+    flashStatus(`「${pendingZonePreset.name}」— 角クリック → 始点/Enter で形を決定 → ドラッグ → Enter で固定`);
   } else if (tool === "place" && MACHINES_UI_ENABLED) {
     canvas.selection = false;
     canvas.skipTargetFind = false;
@@ -1626,6 +1777,10 @@ function updateCanvasCursor() {
   }
   if (activeTool === "line" || activeTool === "zone") {
     canvas.setCursor("crosshair");
+    return;
+  }
+  if (pendingPlacementZone) {
+    canvas.setCursor("move");
     return;
   }
   canvas.setCursor("default");
@@ -1740,6 +1895,10 @@ function disableShapeDraw() {
 }
 
 function deleteSelected() {
+  if (pendingPlacementZone) {
+    cancelZonePlacement();
+    return;
+  }
   canvas.getActiveObjects().forEach((o) => canvas.remove(o));
   canvas.discardActiveObject();
   pushHistory();
@@ -1853,6 +2012,27 @@ function updateProps() {
   const obj = canvas.getActiveObject();
   const content = document.getElementById("props-content");
   const form = document.getElementById("props-form");
+
+  if (pendingPlacementZone) {
+    const z = pendingPlacementZone;
+    form.hidden = true;
+    const metrics = z._zoneMetrics;
+    const sizeBlock = metrics
+      ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics).replace("\n", " · "))}</p>`
+      : `<p class="prop-meta" style="color:var(--muted)">サイズ: 縮尺未設定</p>`;
+    content.innerHTML = `
+      <p class="prop-type">区画 — 配置中</p>
+      <p class="prop-meta">${esc(z.zoneName || "区画")}</p>
+      ${sizeBlock}
+      <p class="prop-meta prop-hint">区画の中を<strong>ドラッグ</strong>して位置を調整</p>
+      <p class="prop-meta prop-hint"><strong>Enter</strong> で固定 · <strong>Esc</strong> で取消</p>
+      <button type="button" class="btn btn-primary btn-block" id="props-confirm-zone">Enter で固定</button>
+      <button type="button" class="btn btn-ghost btn-block btn-sm" id="props-cancel-zone">取消 (Esc)</button>
+    `;
+    document.getElementById("props-confirm-zone")?.addEventListener("click", confirmZonePlacement);
+    document.getElementById("props-cancel-zone")?.addEventListener("click", cancelZonePlacement);
+    return;
+  }
 
   if (!obj) {
     content.innerHTML = `<p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>`;
@@ -2146,6 +2326,20 @@ function exportPng() {
 function setupKeyboard() {
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select")) return;
+
+    if (pendingPlacementZone) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        confirmZonePlacement();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelZonePlacement();
+        return;
+      }
+    }
+
     if (e.code === "Space") {
       spaceDown = true;
       e.preventDefault();
