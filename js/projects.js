@@ -1,4 +1,4 @@
-import { DRAWINGS, MASTER_PROJECT_ID, STORAGE_PREFIX } from "./constants.js";
+import { DRAWINGS, MASTER_PROJECT_ID, KUSHITA_PROJECT_ID, KUSHITA_DRAWINGS, STORAGE_PREFIX } from "./constants.js";
 
 const IMPORTED_KEY = STORAGE_PREFIX + "imported-proposals";
 let sharedManifest = null;
@@ -32,14 +32,28 @@ export function getMasterProject() {
     id: MASTER_PROJECT_ID,
     name: "原本",
     type: "master",
-    sheets: DRAWINGS.map((d) => ({
-      id: d.id,
-      name: d.name,
-      file: d.file,
-      kind: d.kind || "pdf",
-      pages: d.pages,
-      planWidthMm: d.planWidthMm,
-    })),
+    sheets: DRAWINGS.map(mapDrawingToSheet),
+  };
+}
+
+function mapDrawingToSheet(d) {
+  return {
+    id: d.id,
+    name: d.name,
+    file: d.file,
+    kind: d.kind || "pdf",
+    pages: d.pages,
+    planWidthMm: d.planWidthMm,
+  };
+}
+
+export function getKushitaProject() {
+  return {
+    id: KUSHITA_PROJECT_ID,
+    name: "日下",
+    type: "shared",
+    author: "日下",
+    sheets: KUSHITA_DRAWINGS.map(mapDrawingToSheet),
   };
 }
 
@@ -65,7 +79,7 @@ export async function getAllProjects() {
       baseDrawing: s.baseDrawing,
     })),
   }));
-  return [getMasterProject(), ...shared, ...imported];
+  return [getMasterProject(), getKushitaProject(), ...shared, ...imported];
 }
 
 export function findProject(projectId) {
@@ -80,7 +94,7 @@ export async function refreshProjects() {
 }
 
 function getAllProjectsSync() {
-  return cachedProjects || [getMasterProject()];
+  return cachedProjects || [getMasterProject(), getKushitaProject()];
 }
 
 export function setCachedProjects(projects) {
@@ -88,7 +102,7 @@ export function setCachedProjects(projects) {
 }
 
 export function getCachedProjects() {
-  return cachedProjects || [getMasterProject()];
+  return cachedProjects || [getMasterProject(), getKushitaProject()];
 }
 
 export function getProjectSheets(projectId) {
