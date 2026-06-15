@@ -51,6 +51,8 @@ import {
   applyDrawingTransform,
   syncUserObjectsToDrawing,
   configureDrawingResize,
+  isValidDrawingTransform,
+  isDrawingOnScreen,
 } from "./drawing-transform.js";
 import { saveDesign, loadDesign } from "./storage.js";
 import {
@@ -128,8 +130,18 @@ async function init() {
   setupZoneUI();
   setupKeyboard();
   if (MACHINES_UI_ENABLED) await rebuildPalette();
+  await waitForLayout();
   await loadDrawing(currentSheets[0].id);
   setTool("zone");
+}
+
+function waitForLayout() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      resizeCanvas();
+      requestAnimationFrame(resolve);
+    });
+  });
 }
 
 function initCanvas() {
@@ -244,14 +256,35 @@ function initCanvas() {
     if (e.button === 1) e.preventDefault();
   });
   resizeCanvas();
-  window.addEventListener("resize", resizeCanvas);
+  window.addEventListener("resize", () => {
+    resizeCanvas();
+    if (drawingImage && !isDrawingOnScreen(drawingImage, canvas)) {
+      fitDrawing(false);
+      canvas.requestRenderAll();
+    }
+  });
   window.addEventListener("beforeunload", () => persistCurrent());
 }
 
 function resizeCanvas() {
   const rect = canvasWrap.getBoundingClientRect();
-  canvas.setWidth(rect.width);
-  canvas.setHeight(rect.height);
+  const w = Math.max(320, Math.floor(rect.width));
+  const h = Math.max(240, Math.floor(rect.height));
+  canvas.setWidth(w);
+  canvas.setHeight(h);
+  canvas.requestRenderAll();
+}
+
+function placeDrawingOnCanvas(savedTransform) {
+  if (!drawingImage) return;
+  if (savedTransform && isValidDrawingTransform(savedTransform)) {
+    applySavedDrawingTransform(savedTransform);
+    if (!isDrawingOnScreen(drawingImage, canvas)) {
+      fitDrawing(false);
+    }
+  } else {
+    fitDrawing(false);
+  }
   canvas.requestRenderAll();
 }
 
@@ -357,8 +390,12 @@ async function loadDrawing(id) {
     canvas.clear();
     drawingImage = null;
     polygonCleanup = null;
+    resizeCanvas();
+    const saved = loadDesign(pageKey());
     await loadSheetBackground(sheet);
-    await restoreDesign(pageKey());
+    await restoreDesign(pageKey(), saved);
+    resizeCanvas();
+    placeDrawingOnCanvas(saved?.drawingTransform);
     if (!currentMmPerImagePx) tryDefaultScale();
     refreshAllZoneMetrics();
     updateScaleUI();
@@ -367,12 +404,15 @@ async function loadDrawing(id) {
     refreshZoneHooksList();
     persistCurrent();
     pushHistory(true);
+    if (!drawingImage) {
+      throw new Error("図面画像の生成に失敗しました");
+    }
     const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
     setStatus(`${proj} / ${sheet.name} — ページ ${currentPage}`);
   } catch (err) {
     isRestoringHistory = false;
     cancelPendingAutoSave();
-    setStatus("図面の読み込みに失敗しました");
+    setStatus(`図面の読み込みに失敗: ${err?.message || err} — 図面を切り替えるか再読み込みしてください`);
     console.error(err);
   }
 }
@@ -413,6 +453,7 @@ function fitDrawing(resetView = false) {
     (canvas.getWidth() - pad * 2) / iw,
     (canvas.getHeight() - pad * 2) / ih
   );
+  if (!Number.isFinite(scale) || scale <= 0) return;
   drawingImage.set({
     scaleX: scale,
     scaleY: scale,
@@ -527,6 +568,9 @@ async function reloadPage() {
     await loadDrawingImage(pdf.dataUrl);
   }
   await restoreDesign(pageKey());
+  resizeCanvas();
+  const saved = loadDesign(pageKey());
+  placeDrawingOnCanvas(saved?.drawingTransform);
   if (!currentMmPerImagePx) tryDefaultScale();
   refreshAllZoneMetrics();
   updateScaleUI();
@@ -2244,22 +2288,11 @@ function persistCurrent() {
   });
 }
 
-function restoreDesign(key) {
+function restoreDesign(key, data = loadDesign(key)) {
   return new Promise((resolve) => {
-    const data = loadDesign(key);
     currentMmPerImagePx = data?.mmPerImagePx ?? null;
 
-    const placeDrawing = () => {
-      if (!drawingImage) return;
-      if (data?.drawingTransform) {
-        applySavedDrawingTransform(data.drawingTransform);
-      } else {
-        fitDrawing(false);
-      }
-    };
-
     if (!data) {
-      placeDrawing();
       resolve();
       return;
     }
@@ -2269,7 +2302,6 @@ function restoreDesign(key) {
     }
 
     if (!data.objects?.length) {
-      placeDrawing();
       resolve();
       return;
     }
@@ -2286,7 +2318,6 @@ function restoreDesign(key) {
         canvas.add(o);
       });
       if (drawingImage) drawingImage.sendToBack();
-      placeDrawing();
       canvas.requestRenderAll();
       applyMachinesVisibility();
       refreshZoneHooksList();

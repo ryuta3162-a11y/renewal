@@ -30,6 +30,31 @@ export function applyDrawingTransform(img, t) {
   img.setCoords();
 }
 
+/** 保存済みの図面位置が有効か */
+export function isValidDrawingTransform(t) {
+  if (!t) return false;
+  const { left, top, scaleX, scaleY } = t;
+  if (![left, top, scaleX, scaleY].every((n) => Number.isFinite(n))) return false;
+  if (scaleX <= 0.001 || scaleY <= 0.001) return false;
+  if (scaleX > 100 || scaleY > 100) return false;
+  return true;
+}
+
+/** 図面がキャンバス上に十分見えているか */
+export function isDrawingOnScreen(img, canvas) {
+  if (!img || !canvas) return false;
+  const w = img.getScaledWidth?.() ?? 0;
+  const h = img.getScaledHeight?.() ?? 0;
+  if (w < 20 || h < 20) return false;
+  const b = img.getBoundingRect(true);
+  const cw = canvas.getWidth();
+  const ch = canvas.getHeight();
+  if (!cw || !ch) return false;
+  const overlapW = Math.min(b.left + b.width, cw) - Math.max(b.left, 0);
+  const overlapH = Math.min(b.top + b.height, ch) - Math.max(b.top, 0);
+  return overlapW > 40 && overlapH > 40;
+}
+
 /** 図面のスケール変更を区画・測定線などへ同期 */
 export function syncUserObjectsToDrawing(canvas, getUserObjects, before, after) {
   if (!before || !after || !canvas) return;
