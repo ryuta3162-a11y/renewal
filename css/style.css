@@ -434,6 +434,28 @@ body {
   gap: 0.35rem;
   margin-top: 0.5rem;
 }
+.zone-dim-toggles {
+  margin: 0.55rem 0;
+  padding: 0.5rem 0.55rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.zone-dim-toggles-title {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.zone-dim-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.74rem;
+  color: var(--text);
+  cursor: pointer;
+  margin-top: 0.3rem;
+}
+.zone-dim-toggle input { accent-color: var(--primary); }
 
 .modal-note { font-size: 0.7rem; color: var(--muted); line-height: 1.5; }
 

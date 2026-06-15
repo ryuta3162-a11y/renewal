@@ -30,6 +30,8 @@ export const ZONE_SERIALIZE_PROPS = [
   "zoneOpacity",
   "zonePresetId",
   "zoneInstanceId",
+  "zoneShowEdgeLengths",
+  "zoneShowBBoxDims",
 ];
 
 export function getZoneStyle(color, opacity) {
@@ -111,6 +113,7 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx) {
   const markers = syncEdgeDimMarkers(group, edges.length);
   const groupAngle = group.angle || 0;
   const outwardPad = 12 / Math.max(group.scaleX || 1, group.scaleY || 1, 0.25);
+  const showEdges = group.zoneShowEdgeLengths !== false;
 
   edges.forEach((edge, i) => {
     const marker = markers[i];
@@ -123,11 +126,11 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx) {
     const local = canvasPointToGroupLocal(group, outward);
 
     marker.set({
-      text: edge.lengthM != null ? `${edge.lengthM.toFixed(2)}m` : "",
+      text: showEdges && edge.lengthM != null ? `${edge.lengthM.toFixed(2)}m` : "",
       left: local.x,
       top: local.y,
       angle: edge.angleDeg - groupAngle,
-      visible: edge.lengthM != null,
+      visible: showEdges && edge.lengthM != null,
     });
   });
   if (typeof group.triggerLayout === "function") {
@@ -156,14 +159,14 @@ export function refreshZoneDisplay(group, metrics, drawingImage, mmPerImagePx) {
   updateZoneEdgeLengths(group, drawingImage, mmPerImagePx);
 }
 
-function buildZoneLabelText(name, metrics) {
-  const sizeLine = formatZoneSizeText(metrics);
+function buildZoneLabelText(name, metrics, opts = {}) {
+  const sizeLine = formatZoneSizeText(metrics, opts);
   if (sizeLine) return `${name}\n${sizeLine}`;
   return name;
 }
 
-function fitZoneLabel(name, metrics, maxW) {
-  const text = buildZoneLabelText(name, metrics);
+function fitZoneLabel(name, metrics, maxW, opts = {}) {
+  const text = buildZoneLabelText(name, metrics, opts);
   for (let fs = 13; fs >= 7; fs--) {
     const tb = new fabric.Textbox(text, {
       width: maxW,
@@ -242,11 +245,12 @@ export function updateZoneLabel(group, metrics = undefined) {
   const name = group.zoneName || "区画";
   const m = metrics !== undefined ? metrics : group._zoneMetrics ?? null;
   if (metrics !== undefined) group._zoneMetrics = metrics;
+  const labelOpts = { showBBoxDims: group.zoneShowBBoxDims !== false };
   const labelW = Math.max(72, Math.min(200, (poly.width || 120) * (group.scaleX || 1)));
   label.set({
-    text: buildZoneLabelText(name, m),
+    text: buildZoneLabelText(name, m, labelOpts),
     width: labelW,
-    fontSize: fitZoneLabel(name, m, labelW),
+    fontSize: fitZoneLabel(name, m, labelW, labelOpts),
   });
   group.dirty = true;
 }

@@ -2087,6 +2087,40 @@ function updatePropsLive() {
   document.getElementById("prop-rotation-val").textContent = `${Math.round(obj.angle || 0)}°`;
 }
 
+function renderZoneDimToggles(zone) {
+  const showEdges = zone.zoneShowEdgeLengths !== false;
+  const showBBox = zone.zoneShowBBoxDims !== false;
+  return `
+    <div class="zone-dim-toggles">
+      <p class="zone-dim-toggles-title">寸法表示（区画ごと）</p>
+      <label class="zone-dim-toggle">
+        <input type="checkbox" id="prop-zone-edge-lengths" ${showEdges ? "checked" : ""} />
+        各辺の長さ (m)
+      </label>
+      <label class="zone-dim-toggle">
+        <input type="checkbox" id="prop-zone-bbox-dims" ${showBBox ? "checked" : ""} />
+        横・縦（坪数の下）
+      </label>
+    </div>
+  `;
+}
+
+function bindZoneDimToggles(zone) {
+  const onDimToggle = () => {
+    zone.set({
+      zoneShowEdgeLengths: document.getElementById("prop-zone-edge-lengths")?.checked ?? true,
+      zoneShowBBoxDims: document.getElementById("prop-zone-bbox-dims")?.checked ?? true,
+    });
+    refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+    canvas.requestRenderAll();
+    pushHistory();
+    scheduleAutoSave();
+    updateProps();
+  };
+  document.getElementById("prop-zone-edge-lengths")?.addEventListener("change", onDimToggle);
+  document.getElementById("prop-zone-bbox-dims")?.addEventListener("change", onDimToggle);
+}
+
 function updateProps() {
   const obj = canvas.getActiveObject();
   const content = document.getElementById("props-content");
@@ -2103,11 +2137,13 @@ function updateProps() {
       <p class="prop-type">区画 — 配置中</p>
       <p class="prop-meta">${esc(z.zoneName || "区画")}</p>
       ${sizeBlock}
+      ${renderZoneDimToggles(z)}
       <p class="prop-meta prop-hint">区画の中を<strong>ドラッグ</strong>して位置を調整</p>
       <p class="prop-meta prop-hint"><strong>Enter</strong> で固定 · <strong>Esc</strong> で取消</p>
       <button type="button" class="btn btn-primary btn-block" id="props-confirm-zone">Enter で固定</button>
       <button type="button" class="btn btn-ghost btn-block btn-sm" id="props-cancel-zone">取消 (Esc)</button>
     `;
+    bindZoneDimToggles(z);
     document.getElementById("props-confirm-zone")?.addEventListener("click", confirmZonePlacement);
     document.getElementById("props-cancel-zone")?.addEventListener("click", cancelZonePlacement);
     return;
@@ -2170,12 +2206,14 @@ function updateProps() {
       <p class="prop-type">区画</p>
       <p class="prop-meta">${esc(obj.zoneName || "区画")}</p>
       ${sizeBlock}
+      ${renderZoneDimToggles(obj)}
       ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : `<p class="prop-meta" style="color:var(--muted)">メモなし</p>`}
       <div class="zone-prop-actions">
         <button class="btn btn-primary btn-sm" id="btn-edit-zone">✎ 修正</button>
         <button class="btn btn-danger btn-sm zone-delete-btn" id="btn-delete-zone" title="削除">🗑</button>
       </div>
     `;
+    bindZoneDimToggles(obj);
     document.getElementById("btn-edit-zone")?.addEventListener("click", () => openZoneModal(obj));
     document.getElementById("btn-delete-zone")?.addEventListener("click", () => deleteZone(obj));
     document.getElementById("prop-label").closest(".prop-field").hidden = false;

@@ -170,13 +170,17 @@ export function formatSegmentDimsAlways(metrics) {
   return `横 ${metrics.widthM.toFixed(2)}m　縦 ${metrics.depthM.toFixed(2)}m`;
 }
 
-export function formatZoneSizeText(metrics) {
+export function formatZoneSizeText(metrics, opts = {}) {
   if (!metrics) return null;
   const m2 = metrics.areaM2.toFixed(2);
   const tsubo = metrics.areaTsubo.toFixed(2);
-  const w = metrics.widthM.toFixed(1);
-  const d = metrics.depthM.toFixed(1);
-  return `${m2}㎡ (${tsubo}坪)\n横 ${w}m　縦 ${d}m`;
+  let text = `${m2}㎡ (${tsubo}坪)`;
+  if (opts.showBBoxDims !== false) {
+    const w = metrics.widthM.toFixed(1);
+    const d = metrics.depthM.toFixed(1);
+    text += `\n横 ${w}m　縦 ${d}m`;
+  }
+  return text;
 }
 
 export function formatZoneSizeShort(metrics) {
