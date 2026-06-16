@@ -107,6 +107,7 @@ let editingCustomPresetId = null;
 let drawingImage = null;
 let drawingTransformBefore = null;
 let currentMmPerImagePx = null;
+let scaleCalibrated = false;
 let scaleCalibCleanup = null;
 let autoSaveTimer = null;
 let lastSavedAt = null;
@@ -420,12 +421,14 @@ async function loadDrawing(id) {
     polygonCleanup = null;
     resizeCanvas();
     const saved = loadDesign(pageKey());
+    scaleCalibrated = !!saved?.scaleCalibrated;
     await loadSheetBackground(sheet);
     resizeCanvas();
     placeDrawingOnCanvas(saved?.drawingTransform);
     await restoreDesign(pageKey(), saved, { skipViewport: true });
     applySavedViewport(saved?.viewport);
     if (!currentMmPerImagePx) tryDefaultScale();
+    renderScaleHints();
     refreshAllZoneMetrics();
     updateScaleUI();
     isRestoringHistory = false;
@@ -604,11 +607,13 @@ async function reloadPage() {
     await loadDrawingImage(pdf.dataUrl);
   }
   const saved = loadDesign(pageKey());
+  scaleCalibrated = !!saved?.scaleCalibrated;
   resizeCanvas();
   placeDrawingOnCanvas(saved?.drawingTransform);
   await restoreDesign(pageKey(), saved, { skipViewport: true });
   applySavedViewport(saved?.viewport);
   if (!currentMmPerImagePx) tryDefaultScale();
+  renderScaleHints();
   refreshAllZoneMetrics();
   updateScaleUI();
   isRestoringHistory = false;
@@ -821,16 +826,101 @@ function ensureDrawingScale() {
   return !!currentMmPerImagePx;
 }
 
+function renderScaleHints() {
+  const container = document.getElementById("scale-hints");
+  if (!container) return;
+  container.innerHTML = "";
+  const sheet = getCurrentSheet(currentDrawingId);
+  const hints = sheet?.scaleHints;
+  if (!hints?.length) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  const label = document.createElement("p");
+  label.className = "scale-hints-label";
+  label.textContent = "よく使う寸法（タップで入力）";
+  container.appendChild(label);
+  hints.forEach((h) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-ghost btn-xs scale-hint-btn";
+    btn.textContent = h.label;
+    btn.title = h.tip;
+    btn.addEventListener("click", () => {
+      const input = document.getElementById("scale-known-mm");
+      if (input) input.value = h.mm;
+      const tip = document.getElementById("scale-hint-tip");
+      if (tip) {
+        tip.textContent = h.tip;
+        tip.hidden = false;
+      }
+      flashStatus(`${h.mm}mm を入力しました → 「2点で縮尺設定」を押して両端をクリック`);
+    });
+    container.appendChild(btn);
+  });
+}
+
+function showScaleCalibHud(show, stepText = "", mmText = "") {
+  const hud = document.getElementById("scale-calib-hud");
+  const stepEl = document.getElementById("scale-calib-step");
+  const mmEl = document.getElementById("scale-calib-mm");
+  if (hud) hud.hidden = !show;
+  if (stepEl && stepText) stepEl.textContent = stepText;
+  if (mmEl) mmEl.textContent = mmText;
+}
+
+function updateScaleVerify() {
+  const el = document.getElementById("scale-verify");
+  if (!el) return;
+  const sheet = getCurrentSheet(currentDrawingId);
+  if (!sheet?.planAreaM2) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  const tsubo = sheet.planAreaTsubo ? `（${sheet.planAreaTsubo}坪）` : "";
+  if (scaleCalibrated) {
+    el.textContent = `店舗全体の目安: ${sheet.planAreaM2}㎡${tsubo} — 全区画を足して近いか確認`;
+  } else {
+    el.textContent = `設定後、店舗全体は約 ${sheet.planAreaM2}㎡${tsubo} 前後になるはずです`;
+  }
+}
+
 function updateScaleUI() {
   const el = document.getElementById("scale-status");
-  if (el) el.textContent = formatScaleStatus(currentMmPerImagePx);
+  const badge = document.getElementById("scale-badge");
+  if (!el) return;
+  if (!currentMmPerImagePx) {
+    el.textContent = "縮尺未設定 — 上の手順で設定してください";
+    if (badge) {
+      badge.textContent = "未設定";
+      badge.className = "scale-badge tentative";
+    }
+    updateScaleVerify();
+    return;
+  }
+  if (scaleCalibrated) {
+    el.textContent = formatScaleStatus(currentMmPerImagePx);
+    if (badge) {
+      badge.textContent = "設定済み";
+      badge.className = "scale-badge ok";
+    }
+  } else {
+    el.innerHTML = `<span class="scale-warn">※仮の縮尺（要：2点設定）</span><br>${formatScaleStatus(currentMmPerImagePx)}`;
+    if (badge) {
+      badge.textContent = "仮";
+      badge.className = "scale-badge tentative";
+    }
+  }
+  updateScaleVerify();
 }
 
 function setupScaleUI() {
   document.getElementById("btn-scale-calibrate")?.addEventListener("click", () => {
     const mm = parseFloat(document.getElementById("scale-known-mm")?.value);
     if (!mm || mm <= 0) {
-      flashStatus("既知の距離（mm）を入力してください");
+      flashStatus("寸法線の数字（mm）を入力するか、下のボタンをタップしてください");
       return;
     }
     if (!drawingImage) {
@@ -851,7 +941,9 @@ function startScaleCalibration(realMm) {
 
   const points = [];
   let previewLine = null;
+  let previewLabel = null;
   const dots = [];
+  const mmLabel = `${realMm.toLocaleString()}mm`;
 
   const cleanup = () => {
     canvas.off("mouse:down", handler);
@@ -859,11 +951,16 @@ function startScaleCalibration(realMm) {
     document.removeEventListener("keydown", keyHandler);
     dots.forEach((d) => canvas.remove(d));
     if (previewLine) canvas.remove(previewLine);
+    if (previewLabel) canvas.remove(previewLabel);
     canvas.requestRenderAll();
     scaleCalibCleanup = null;
+    showScaleCalibHud(false);
+    canvasWrap?.classList.remove("scale-calibrating");
   };
 
   scaleCalibCleanup = cleanup;
+  showScaleCalibHud(true, "① 寸法線の左端（始点）をクリック", mmLabel);
+  canvasWrap?.classList.add("scale-calibrating");
 
   const handler = (opt) => {
     const e = opt.e;
@@ -871,16 +968,36 @@ function startScaleCalibration(realMm) {
 
     if (e.type === "mousemove" && points.length === 1) {
       if (previewLine) canvas.remove(previewLine);
+      if (previewLabel) canvas.remove(previewLabel);
       previewLine = new fabric.Line([points[0].x, points[0].y, ptr.x, ptr.y], {
         stroke: "#f59e0b",
-        strokeWidth: 2,
-        strokeDashArray: [6, 4],
+        strokeWidth: 3,
+        strokeDashArray: [8, 4],
         selectable: false,
         evented: false,
         _skipHistory: true,
         _scalePreview: true,
       });
       canvas.add(previewLine);
+      const ip1 = canvasToImagePx(points[0], drawingImage);
+      const ip2 = canvasToImagePx(ptr, drawingImage);
+      const pxDist = imagePxDistance(ip1, ip2);
+      const previewMm = pxDist * (realMm / pxDist || 0);
+      previewLabel = new fabric.Text(`${mmLabel} の線`, {
+        left: (points[0].x + ptr.x) / 2,
+        top: (points[0].y + ptr.y) / 2 - 14,
+        fontSize: 12,
+        fill: "#92400e",
+        fontWeight: "700",
+        backgroundColor: "rgba(255,251,235,0.95)",
+        originX: "center",
+        originY: "bottom",
+        selectable: false,
+        evented: false,
+        _skipHistory: true,
+        _scalePreview: true,
+      });
+      canvas.add(previewLabel);
       canvas.requestRenderAll();
     }
 
@@ -890,8 +1007,8 @@ function startScaleCalibration(realMm) {
     const dot = new fabric.Circle({
       left: ptr.x,
       top: ptr.y,
-      radius: 5,
-      fill: "#f59e0b",
+      radius: 6,
+      fill: points.length === 1 ? "#f59e0b" : "#16a34a",
       stroke: "#fff",
       strokeWidth: 2,
       originX: "center",
@@ -904,18 +1021,24 @@ function startScaleCalibration(realMm) {
     dots.push(dot);
     canvas.add(dot);
 
+    if (points.length === 1) {
+      showScaleCalibHud(true, "② 寸法線の右端（終点）をクリック", mmLabel);
+      flashStatus(`① OK — 同じ寸法線の反対側をクリック（${mmLabel}）`);
+    }
+
     if (points.length === 2) {
       const ip1 = canvasToImagePx(points[0], drawingImage);
       const ip2 = canvasToImagePx(points[1], drawingImage);
       const dist = imagePxDistance(ip1, ip2);
       currentMmPerImagePx = mmPerImagePxFromCalibration(dist, realMm);
+      scaleCalibrated = true;
       cleanup();
       refreshAllZoneMetrics();
       updateScaleUI();
       refreshZoneHooksList();
       pushHistory();
       scheduleAutoSave();
-      flashStatus(`縮尺を設定しました（${formatScaleStatus(currentMmPerImagePx)}）`);
+      flashStatus(`縮尺設定完了（${mmLabel}）。区画の㎡・辺の長さが図面に合わせて更新されました`);
     }
     canvas.requestRenderAll();
   };
@@ -931,7 +1054,7 @@ function startScaleCalibration(realMm) {
   canvas.on("mouse:down", handler);
   canvas.on("mouse:move", handler);
   document.addEventListener("keydown", keyHandler);
-  flashStatus("縮尺: 図面上の2点をクリック（Escでキャンセル）");
+  flashStatus(`縮尺: 図面上の ${mmLabel} の寸法線の両端をクリック（Escで取消）`);
 }
 
 const HOOK_STATE_KEY = "renewal-zone-hook-collapsed";
@@ -2543,6 +2666,7 @@ function persistCurrent() {
     objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
     viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
     mmPerImagePx: currentMmPerImagePx,
+    scaleCalibrated,
     drawingTransform: drawingImage
       ? {
           left: drawingImage.left,
@@ -2557,6 +2681,7 @@ function persistCurrent() {
 function restoreDesign(key, data = loadDesign(key), opts = {}) {
   return new Promise((resolve) => {
     currentMmPerImagePx = data?.mmPerImagePx ?? null;
+    if (data?.scaleCalibrated != null) scaleCalibrated = !!data.scaleCalibrated;
 
     if (!data) {
       resolve();

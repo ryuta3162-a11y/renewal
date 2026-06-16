@@ -35,6 +35,9 @@ function mapDrawingToSheet(d) {
     kind: d.kind || "pdf",
     pages: d.pages,
     planWidthMm: d.planWidthMm,
+    scaleHints: d.scaleHints,
+    planAreaM2: d.planAreaM2,
+    planAreaTsubo: d.planAreaTsubo,
   };
 }
 

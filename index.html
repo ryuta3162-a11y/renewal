@@ -72,14 +72,23 @@
         <div class="scale-panel">
           <div class="panel-header-row">
             <span class="panel-title sub">図面縮尺</span>
+            <span class="scale-badge tentative" id="scale-badge">未設定</span>
           </div>
-          <p class="panel-hint">区画に <strong>各辺の長さ・㎡・坪</strong> を自動表示します</p>
+          <ol class="scale-steps">
+            <li>図面の<strong>寸法線の数字</strong>（mm）を下に入力</li>
+            <li><strong>2点で縮尺設定</strong> → その線の<strong>両端</strong>をクリック</li>
+            <li>区画を描くと <strong>㎡・坪・辺の長さ</strong> が出ます</li>
+          </ol>
+          <p class="panel-hint scale-note">横1本だけでOK。縦は自動計算されます。</p>
           <label class="prop-field mini">
-            既知の距離 (mm)
-            <input type="number" id="scale-known-mm" placeholder="例: 8000" min="1" step="1" />
+            寸法線の長さ (mm)
+            <input type="number" id="scale-known-mm" placeholder="例: 12392" min="1" step="1" />
           </label>
-          <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-scale-calibrate">2点で縮尺設定</button>
+          <p class="scale-hint-tip" id="scale-hint-tip" hidden></p>
+          <div class="scale-hints" id="scale-hints"></div>
+          <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-scale-calibrate">② 2点で縮尺設定</button>
           <p class="scale-status" id="scale-status">縮尺未設定</p>
+          <p class="scale-verify" id="scale-verify" hidden></p>
         </div>
         <div class="zone-custom-section">
           <div class="panel-header-row">
@@ -114,6 +123,11 @@
             <span class="zone-place-step"><kbd>Enter</kbd> で固定</span>
             <button type="button" class="btn btn-primary btn-xs zone-place-confirm" id="btn-zone-place-confirm">Enter で固定</button>
             <button type="button" class="btn btn-ghost btn-xs" id="btn-zone-place-cancel">Esc 取消</button>
+          </div>
+          <div id="scale-calib-hud" class="scale-calib-hud" hidden>
+            <strong>縮尺設定</strong>
+            <span id="scale-calib-step">① 寸法線の左端をクリック</span>
+            <span id="scale-calib-mm"></span>
           </div>
         </div>
         <footer id="status" class="status-bar">準備中… — 変更は自動保存されます</footer>

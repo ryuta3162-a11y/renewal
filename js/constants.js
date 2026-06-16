@@ -5,13 +5,20 @@ export const STORAGE_PREFIX = "renewal-studio-";
 /** 図面に planWidthMm が無い場合の全幅仮定（mm）— みと図面等と同値 */
 export const DEFAULT_PLAN_WIDTH_MM = 29080;
 
+/** 経堂原本系 — 現場スタッフ向け縮尺プリセット（図面上の寸法線 mm） */
+export const KYODO_SCALE_HINTS = [
+  { label: "FW横 12392", mm: 12392, tip: "フリーウェイト上の横寸法線（左右の端）" },
+  { label: "区画 30300", mm: 30300, tip: "図面上部の長い横寸法線（7000+30300…の30300部分）" },
+  { label: "境界 29890", mm: 29890, tip: "隣地境界線の長さ" },
+];
+
 export const DRAWINGS = [
-  { id: "kyodo-7", name: "原本-7", file: "/drawings/kyodo-7.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "kyodo-8", name: "原本-8", file: "/drawings/kyodo-8.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "kyodo-9", name: "原本-9", file: "/drawings/kyodo-9.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "kushita-1", name: "日下 図面1", file: "/drawings/kushita-1.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "kushita-2", name: "日下 図面2", file: "/drawings/kushita-2.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "kushita-3", name: "日下 図面3", file: "/drawings/kushita-3.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "kyodo-7", name: "原本-7", file: "/drawings/kyodo-7.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
+  { id: "kyodo-8", name: "原本-8", file: "/drawings/kyodo-8.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
+  { id: "kyodo-9", name: "原本-9", file: "/drawings/kyodo-9.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
+  { id: "kushita-1", name: "日下 図面1", file: "/drawings/kushita-1.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
+  { id: "kushita-2", name: "日下 図面2", file: "/drawings/kushita-2.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
+  { id: "kushita-3", name: "日下 図面3", file: "/drawings/kushita-3.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "kyodo-17", name: "原本-17", file: "/drawings/kyodo-17.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "gyotoku-1", name: "行徳-図面1", file: "/drawings/gyotoku-1.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "gyotoku-2", name: "行徳-図面2", file: "/drawings/gyotoku-2.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
