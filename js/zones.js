@@ -80,15 +80,13 @@ function hideLegacyBBoxDims(group) {
 function syncEdgeDimMarkers(group, count) {
   let markers = group._objects?.filter((o) => o._zoneDim === "edge") ?? [];
   while (markers.length < count) {
-    const marker = createDimMarker("edge");
-    group.add(marker);
-    markers.push(marker);
+    group.add(createDimMarker("edge"));
+    markers = group._objects?.filter((o) => o._zoneDim === "edge") ?? [];
   }
-  while (markers.length > count) {
-    const rem = markers.pop();
-    group.remove(rem);
-  }
-  return group._objects.filter((o) => o._zoneDim === "edge");
+  markers.forEach((marker, i) => {
+    if (i >= count) marker.set({ text: "", visible: false });
+  });
+  return markers.slice(0, count);
 }
 
 function canvasPointToGroupLocal(group, pt) {
@@ -713,6 +711,19 @@ const CALIB_STYLE = {
   guideStroke: "#f59e0b",
 };
 
+/** グループ外に漏れた寸法ラベル（削除・変形の残骸）を除去 */
+export function purgeOrphanZoneDimensions(canvas) {
+  if (!canvas) return;
+  let removed = false;
+  canvas.getObjects().forEach((o) => {
+    if (o._zoneDim && o.objectType !== "zone") {
+      canvas.remove(o);
+      removed = true;
+    }
+  });
+  if (removed) canvas.requestRenderAll();
+}
+
 /** 採寸・区画の途中プレビューをすべて除去 */
 export function purgeCanvasPreviews(canvas) {
   if (!canvas) return;
@@ -720,6 +731,7 @@ export function purgeCanvasPreviews(canvas) {
     .getObjects()
     .filter((o) => o._scalePreview || o._zonePreview)
     .forEach((o) => canvas.remove(o));
+  purgeOrphanZoneDimensions(canvas);
   canvas.requestRenderAll();
 }
 

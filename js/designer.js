@@ -22,6 +22,7 @@ import {
   upgradeZoneObject,
   removeOrphanZonePreviews,
   purgeCanvasPreviews,
+  purgeOrphanZoneDimensions,
   enableZoneVertexEdit,
   refreshZoneDisplay,
   ensureZoneDimensionMarkers,
@@ -231,7 +232,10 @@ function initCanvas() {
   });
   canvas.on("object:removed", (e) => {
     if (isRestoringHistory) return;
-    if (e.target?.objectType === "zone") refreshZoneHooksList();
+    if (e.target?.objectType === "zone") {
+      refreshZoneHooksList();
+      purgeOrphanZoneDimensions(canvas);
+    }
     pushHistory();
     scheduleAutoSave();
   });
@@ -652,7 +656,11 @@ function shouldStartPan(opt) {
   if (spaceDown && e.button === 0) return true;
   if (activeTool === "select" && e.button === 0) {
     const t = opt.target;
-    if (!t || t.objectType === "drawing") return true;
+    if (!t) {
+      clearCanvasSelection();
+      return;
+    }
+    if (t.objectType === "drawing") return true;
   }
   return false;
 }
@@ -716,6 +724,7 @@ async function reloadPage() {
   if (!currentMmPerImagePx) tryDefaultScale();
   fillScaleTsuboFromSheet();
   refreshAllZoneMetrics();
+  purgeOrphanZoneDimensions(canvas);
   updateScaleUI();
   if (saved?.workBoundaryCanvasPoints?.length) {
     applyWorkBoundary(saved.workBoundaryCanvasPoints);
@@ -1706,6 +1715,16 @@ function updateZoneActiveLabel() {
   el.textContent = name.replace(/エリア$/, "") || name;
 }
 
+function clearCanvasSelection() {
+  if (!canvas?.getActiveObject()) return;
+  canvas.discardActiveObject();
+  if (document.activeElement?.closest("#props-form, #props-content")) {
+    document.activeElement.blur();
+  }
+  updateProps();
+  canvas.requestRenderAll();
+}
+
 function deleteZone(zone) {
   if (!zone) return;
   const name = zone.zoneName || "区画";
@@ -1713,6 +1732,7 @@ function deleteZone(zone) {
 
   canvas.remove(zone);
   canvas.discardActiveObject();
+  purgeOrphanZoneDimensions(canvas);
   pushHistory();
   refreshZoneHooksList();
   scheduleAutoSave();
@@ -2549,8 +2569,13 @@ function deleteSelected() {
     cancelZoneVertexEdit();
     return;
   }
+  const hadZone = canvas.getActiveObjects().some((o) => o.objectType === "zone");
   canvas.getActiveObjects().forEach((o) => canvas.remove(o));
   canvas.discardActiveObject();
+  if (hadZone) {
+    purgeOrphanZoneDimensions(canvas);
+    refreshZoneHooksList();
+  }
   pushHistory();
   updateProps();
 }
@@ -3141,6 +3166,7 @@ function restoreDesign(key, data = loadDesign(key), opts = {}) {
       refreshZoneHooksList();
       refreshAllZoneMetrics();
       isRestoringHistory = false;
+      purgeOrphanZoneDimensions(canvas);
       resolve();
     });
   });
@@ -3366,6 +3392,7 @@ function pasteClipboardObject() {
     canvas.setActiveObject(obj);
     canvas.requestRenderAll();
     if (obj.objectType === "zone") refreshZoneHooksList();
+    purgeOrphanZoneDimensions(canvas);
     pushHistory();
     scheduleAutoSave();
     updateProps();
@@ -3399,6 +3426,12 @@ function setupKeyboard() {
         cancelZoneVertexEdit();
         return;
       }
+    }
+
+    if (e.key === "Escape" && activeTool === "select" && canvas.getActiveObject()) {
+      e.preventDefault();
+      clearCanvasSelection();
+      return;
     }
 
     if (e.code === "Space") {
