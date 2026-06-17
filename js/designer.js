@@ -129,6 +129,10 @@ let lastSavedAt = null;
 const history = [];
 const historyLimit = 50;
 let isRestoringHistory = false;
+let lastPropsTargetKey = null;
+let clipboardObjectData = null;
+
+const PASTE_OFFSET = 24;
 
 init();
 async function init() {
@@ -2596,7 +2600,6 @@ function applyPropToSelection(field) {
     }
     canvas.requestRenderAll();
     scheduleAutoSave();
-    updateProps();
     return;
   }
 
@@ -2646,17 +2649,85 @@ function enforceMinPartSize(obj) {
   obj.setCoords();
 }
 
+function propsTargetKey(obj) {
+  if (!obj) return null;
+  if (obj.objectType === "zone" || obj.objectType === "fillArea") {
+    return `zone:${obj.zoneInstanceId || obj.zonePresetId || "x"}`;
+  }
+  if (obj.objectType === "drawing") return "drawing";
+  if (obj.objectType === "memo") return `memo:${obj.memoData?.id || ""}:${obj.left}:${obj.top}`;
+  if (obj.objectType === "part") {
+    return `part:${obj.partId || ""}:${obj.partMarkRole || ""}:${obj.partMarkIndex || ""}`;
+  }
+  return `other:${obj.type}`;
+}
+
+function isPropsFormFieldFocused() {
+  const ae = document.activeElement;
+  return !!(ae && ae.closest("#props-form"));
+}
+
+function setInputValueIfIdle(el, value) {
+  if (!el || document.activeElement === el) return;
+  el.value = value;
+}
+
+function updateZoneSizeMetaEl(zone) {
+  const text = zone._zoneMetrics
+    ? formatZoneSizeText(zone._zoneMetrics, zoneLabelOpts(zone)).replace("\n", " · ")
+    : "";
+  let el = document.querySelector("#props-content .zone-size-meta");
+  if (!text) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement("p");
+    el.className = "prop-meta zone-size-meta";
+    document.getElementById("props-content")?.prepend(el);
+  }
+  el.textContent = text;
+}
+
+function updateDrawingPropsMeta(obj) {
+  const pct = Math.round((obj.scaleX || 1) * 100);
+  const w = Math.round(obj.getScaledWidth());
+  const h = Math.round(obj.getScaledHeight());
+  const el = document.querySelector("#props-content .prop-meta");
+  if (el && lastPropsTargetKey === "drawing") {
+    el.textContent = `${pct}% · ${w}×${h}px`;
+    return true;
+  }
+  return false;
+}
+
+function syncZonePropsForm(obj) {
+  if (isPropsFormFieldFocused()) return;
+  setInputValueIfIdle(document.getElementById("prop-label"), obj.zoneName || "");
+  setInputValueIfIdle(document.getElementById("prop-zone-memo"), obj.zoneMemo || "");
+  const fillEl = document.getElementById("prop-fill");
+  if (fillEl && document.activeElement !== fillEl) {
+    fillEl.value = rgbToHex(obj.zoneColor) || "#f59e0b";
+  }
+}
+
 function updatePropsLive() {
   const obj = canvas.getActiveObject();
   if (!obj) return;
   if (obj.objectType === "drawing") {
-    updateProps();
+    if (!updateDrawingPropsMeta(obj)) updateProps();
     return;
   }
-  document.getElementById("prop-width").value = Math.round(obj.getScaledWidth());
-  document.getElementById("prop-height").value = Math.round(obj.getScaledHeight());
-  document.getElementById("prop-rotation").value = Math.round(obj.angle || 0);
-  document.getElementById("prop-rotation-val").textContent = `${Math.round(obj.angle || 0)}°`;
+  if (obj.objectType === "zone" || obj.objectType === "fillArea") {
+    updateZoneSizeMetaEl(obj);
+    return;
+  }
+  if (obj.objectType !== "part") return;
+  setInputValueIfIdle(document.getElementById("prop-width"), Math.round(obj.getScaledWidth()));
+  setInputValueIfIdle(document.getElementById("prop-height"), Math.round(obj.getScaledHeight()));
+  setInputValueIfIdle(document.getElementById("prop-rotation"), Math.round(obj.angle || 0));
+  const rotVal = document.getElementById("prop-rotation-val");
+  if (rotVal) rotVal.textContent = `${Math.round(obj.angle || 0)}°`;
 }
 
 function zoneLabelOpts(zone) {
@@ -2699,7 +2770,7 @@ function bindZoneDimToggles(zone) {
     canvas.requestRenderAll();
     pushHistory();
     scheduleAutoSave();
-    updateProps();
+    updateZoneSizeMetaEl(zone);
   };
   document.getElementById("prop-zone-tsubo")?.addEventListener("change", onDimToggle);
   document.getElementById("prop-zone-edge-lengths")?.addEventListener("change", onDimToggle);
@@ -2715,7 +2786,14 @@ function updateProps() {
 
   if (pendingPlacementZone) {
     const z = pendingPlacementZone;
+    const key = `pending:${z.zoneInstanceId || "x"}`;
+    const sameTarget = lastPropsTargetKey === key;
+    lastPropsTargetKey = key;
     form.hidden = true;
+    if (sameTarget) {
+      updateZoneSizeMetaEl(z);
+      return;
+    }
     const metrics = z._zoneMetrics;
     const sizeBlock = metrics
       ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(z)).replace("\n", " · "))}</p>`
@@ -2733,6 +2811,7 @@ function updateProps() {
   }
 
   if (!obj) {
+    lastPropsTargetKey = null;
     content.innerHTML = `<p class="props-empty">—</p>`;
     form.hidden = true;
     if (MACHINES_UI_ENABLED && pendingPart) showMachinePreview(pendingPart);
@@ -2740,7 +2819,11 @@ function updateProps() {
   }
 
   if (obj.objectType === "drawing") {
+    const key = "drawing";
+    const sameTarget = lastPropsTargetKey === key;
+    lastPropsTargetKey = key;
     form.hidden = true;
+    if (sameTarget && updateDrawingPropsMeta(obj)) return;
     const pct = Math.round((obj.scaleX || 1) * 100);
     const w = Math.round(obj.getScaledWidth());
     const h = Math.round(obj.getScaledHeight());
@@ -2759,6 +2842,7 @@ function updateProps() {
   }
 
   if (obj.objectType === "memo") {
+    lastPropsTargetKey = propsTargetKey(obj);
     form.hidden = true;
     const d = obj.memoData || {};
     content.innerHTML = `
@@ -2776,6 +2860,15 @@ function updateProps() {
   if (obj.objectType === "zone" || obj.objectType === "fillArea") {
     if (obj.objectType === "fillArea") upgradeZoneObject(obj);
     applyInteractiveControls(obj);
+    const key = propsTargetKey(obj);
+    const sameTarget = lastPropsTargetKey === key;
+    lastPropsTargetKey = key;
+    if (sameTarget) {
+      updateZoneSizeMetaEl(obj);
+      form.hidden = false;
+      syncZonePropsForm(obj);
+      return;
+    }
     form.hidden = false;
     const metrics = obj._zoneMetrics;
     const sizeBlock = metrics
@@ -2801,12 +2894,11 @@ function updateProps() {
     });
     document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
     document.getElementById("prop-stroke").closest(".prop-field").hidden = true;
-    document.getElementById("prop-label").value = obj.zoneName || "";
-    document.getElementById("prop-zone-memo").value = obj.zoneMemo || "";
-    document.getElementById("prop-fill").value = rgbToHex(obj.zoneColor) || "#f59e0b";
+    syncZonePropsForm(obj);
     return;
   }
 
+  lastPropsTargetKey = propsTargetKey(obj);
   document.getElementById("prop-label").closest(".prop-field").hidden = false;
   document.querySelectorAll("#props-form .prop-row").forEach((row) => {
     row.hidden = false;
@@ -3211,6 +3303,78 @@ function handleArrowKeyUp(e) {
   finishNudgeSession();
 }
 
+function canCopyPasteSelection() {
+  if (!canvas || activeTool !== "select") return false;
+  if (pendingPlacementZone || zoneVertexEditCleanup) return false;
+  if (scaleCalibCleanup || scaleCalibPendingPoints) return false;
+  return true;
+}
+
+function isCopyableObject(obj) {
+  if (!obj || obj.type === "activeSelection") return false;
+  if (!obj.objectType || obj.objectType === "drawing" || obj.objectType === "workBoundary") return false;
+  return true;
+}
+
+function copySelectedObject() {
+  const obj = canvas?.getActiveObject();
+  if (!isCopyableObject(obj)) return false;
+  clipboardObjectData = obj.toObject(getSerializeProps());
+  return true;
+}
+
+function preparePastedObjectData(data) {
+  const copy = JSON.parse(JSON.stringify(data));
+  copy.left = (copy.left || 0) + PASTE_OFFSET;
+  copy.top = (copy.top || 0) + PASTE_OFFSET;
+  if (copy.objectType === "zone" || copy.objectType === "fillArea") {
+    copy.zoneInstanceId = crypto.randomUUID();
+  }
+  if (copy.objectType === "part" && copy.partMarkRole === "move-from") {
+    copy.partMarkIndex = getNextMarkIndex();
+  }
+  if (copy.objectType === "memo" && copy.memoData) {
+    copy.memoData = { ...copy.memoData, id: crypto.randomUUID() };
+  }
+  return copy;
+}
+
+function finalizePastedObject(obj) {
+  if (obj.objectType === "fillArea" || obj.objectType === "zone") {
+    upgradeZoneObject(obj);
+    ensureZoneDimensionMarkers(obj);
+    refreshZoneOnCanvas(obj, computeZoneMetricsFor(obj));
+  } else if (obj.objectType === "part") {
+    upgradePartGroup(obj);
+  }
+  obj._skipHistory = true;
+  canvas.add(obj);
+  delete obj._skipHistory;
+  applyInteractiveControls(obj);
+  obj.setCoords();
+}
+
+function pasteClipboardObject() {
+  if (!clipboardObjectData || !canvas) return false;
+  const data = preparePastedObjectData(clipboardObjectData);
+  fabric.util.enlivenObjects([data], (objs) => {
+    const obj = objs?.[0];
+    if (!obj) return;
+    finalizePastedObject(obj);
+    clipboardObjectData = obj.toObject(getSerializeProps());
+    if (drawingImage) drawingImage.sendToBack();
+    canvas.setActiveObject(obj);
+    canvas.requestRenderAll();
+    if (obj.objectType === "zone") refreshZoneHooksList();
+    pushHistory();
+    scheduleAutoSave();
+    updateProps();
+    const label = obj.zoneName || obj.partLabel || obj.memoData?.title || "オブジェクト";
+    flashStatus(`「${label}」を複製しました`);
+  });
+  return true;
+}
+
 // ── Keyboard ──────────────────────────────────────
 function setupKeyboard() {
   document.addEventListener("keydown", (e) => {
@@ -3245,6 +3409,18 @@ function setupKeyboard() {
     if (e.key === "Delete" || (e.key === "Backspace" && activeTool === "select")) {
       e.preventDefault();
       deleteSelected();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+      if (canCopyPasteSelection() && copySelectedObject()) {
+        e.preventDefault();
+        flashStatus("コピーしました");
+      }
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+      if (canCopyPasteSelection() && clipboardObjectData) {
+        e.preventDefault();
+        pasteClipboardObject();
+      }
     }
     if (e.key === "z" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
     else if (e.key === "z" || e.key === "Z") setTool("zone");
