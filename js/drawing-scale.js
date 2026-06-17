@@ -18,6 +18,14 @@ export function mmPerImagePxFromCalibration(imagePxDist, realMm) {
   return realMm / imagePxDist;
 }
 
+/** 図面の㎡と囲んだ矩形（画像px）から縮尺を算出 */
+export function mmPerImagePxFromAreaMatch(knownM2, widthPx, heightPx) {
+  if (!knownM2 || !widthPx || !heightPx) return null;
+  const areaPx = widthPx * heightPx;
+  if (areaPx <= 0) return null;
+  return Math.sqrt((knownM2 * 1_000_000) / areaPx);
+}
+
 /** 区画ポリゴンの頂点（キャンバス座標） */
 export function getZoneCanvasPoints(zone) {
   const poly = zone._objects?.[0];
@@ -161,12 +169,12 @@ export function segmentMetrics(canvasA, canvasB, drawingImage, mmPerImagePx) {
 }
 
 export function formatEdgeLength(metrics) {
-  if (!metrics || metrics.lengthM == null) return "縮尺未設定";
+  if (!metrics || metrics.lengthM == null) return "未設定";
   return `${metrics.lengthM.toFixed(2)}m`;
 }
 
 export function formatSegmentDimsAlways(metrics) {
-  if (!metrics) return "縮尺未設定";
+  if (!metrics) return "未設定";
   return `横 ${metrics.widthM.toFixed(2)}m　縦 ${metrics.depthM.toFixed(2)}m`;
 }
 
@@ -188,8 +196,11 @@ export function formatZoneSizeShort(metrics) {
   return `${metrics.areaM2.toFixed(1)}㎡ · 横${metrics.widthM.toFixed(1)} 縦${metrics.depthM.toFixed(1)}m`;
 }
 
-export function formatScaleStatus(mmPerImagePx) {
-  if (!mmPerImagePx) return "縮尺未設定";
-  const mmPerM = mmPerImagePx * 1000;
-  return `1px ≈ ${mmPerImagePx.toFixed(2)}mm（1000px ≈ ${mmPerM.toFixed(0)}mm）`;
+export function formatScaleStatus(mmPerImagePx, summary = null) {
+  if (summary?.widthM != null && summary?.depthM != null) {
+    const m2 = summary.knownM2 ? `（${summary.knownM2}㎡）` : "";
+    return `横 ${summary.widthM.toFixed(1)}m　縦 ${summary.depthM.toFixed(1)}m${m2}`;
+  }
+  if (!mmPerImagePx) return "未設定";
+  return `設定済み`;
 }

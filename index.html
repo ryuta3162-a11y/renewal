@@ -71,24 +71,15 @@
         <p class="panel-hint">区分を開く → <strong>区画を描く</strong> → 同じ名称でも何個でも配置可</p>
         <div class="scale-panel">
           <div class="panel-header-row">
-            <span class="panel-title sub">図面縮尺</span>
+            <span class="panel-title sub">区画測定</span>
             <span class="scale-badge tentative" id="scale-badge">未設定</span>
           </div>
-          <ol class="scale-steps">
-            <li>図面の<strong>寸法線の数字</strong>（mm）を下に入力</li>
-            <li><strong>2点で縮尺設定</strong> → その線の<strong>両端</strong>をクリック</li>
-            <li>区画を描くと <strong>㎡・坪・辺の長さ</strong> が出ます</li>
-          </ol>
-          <p class="panel-hint scale-note">横1本だけでOK。縦は自動計算されます。</p>
           <label class="prop-field mini">
-            寸法線の長さ (mm)
-            <input type="number" id="scale-known-mm" placeholder="例: 12392" min="1" step="1" />
+            平米
+            <input type="number" id="scale-known-m2" placeholder="例: 75.93" min="0.01" step="0.01" inputmode="decimal" />
           </label>
-          <p class="scale-hint-tip" id="scale-hint-tip" hidden></p>
-          <div class="scale-hints" id="scale-hints"></div>
-          <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-scale-calibrate">② 2点で縮尺設定</button>
-          <p class="scale-status" id="scale-status">縮尺未設定</p>
-          <p class="scale-verify" id="scale-verify" hidden></p>
+          <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-area-calibrate">縦横採寸</button>
+          <p class="scale-status" id="scale-status">未設定 — 図面の㎡を入力して縦横採寸</p>
         </div>
         <div class="zone-custom-section">
           <div class="panel-header-row">
@@ -125,8 +116,8 @@
             <button type="button" class="btn btn-ghost btn-xs" id="btn-zone-place-cancel">Esc 取消</button>
           </div>
           <div id="scale-calib-hud" class="scale-calib-hud" hidden>
-            <strong>縮尺設定</strong>
-            <span id="scale-calib-step">① 寸法線の左端をクリック</span>
+            <strong>縦横採寸</strong>
+            <span id="scale-calib-step">図面上で区画を囲んでください</span>
             <span id="scale-calib-mm"></span>
           </div>
         </div>
@@ -184,7 +175,7 @@
             <li>区画を<strong>クリック</strong> → 修正 or 削除を選択</li>
             <li><strong>↖ 選択</strong>で図面をクリック → 四隅ドラッグでサイズ変更（区画も連動）</li>
             <li>描画中・確定後とも<strong>各辺の長さ (m)</strong>を表示</li>
-            <li>区画に<strong>㎡・坪・横縦</strong>が自動表示（左の縮尺設定）</li>
+            <li>区画に<strong>㎡・坪・横縦</strong>が自動表示（左の区画測定）</li>
             <li>左の<strong>リニューアル記号</strong>で取り壊し✕・制作＋・移動元A/移動先→A</li>
             <li>フック上部の<strong>展開・折畳</strong>で全体表示</li>
           </ul>
