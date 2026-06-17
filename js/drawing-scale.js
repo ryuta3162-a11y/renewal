@@ -1,4 +1,5 @@
 const TSUBO_PER_M2 = 1 / 3.305785;
+export const M2_PER_TSUBO = 3.305785;
 
 /** キャンバス座標 → 図面画像の素ピクセル座標 */
 export function canvasToImagePx(pt, drawingImage) {
@@ -24,6 +25,49 @@ export function mmPerImagePxFromAreaMatch(knownM2, widthPx, heightPx) {
   const areaPx = widthPx * heightPx;
   if (areaPx <= 0) return null;
   return Math.sqrt((knownM2 * 1_000_000) / areaPx);
+}
+
+/** 図面の㎡とポリゴン面積（画像px²）から縮尺を算出 */
+export function mmPerImagePxFromAreaPx(knownM2, areaPx) {
+  if (!knownM2 || !areaPx) return null;
+  if (areaPx <= 0) return null;
+  return Math.sqrt((knownM2 * 1_000_000) / areaPx);
+}
+
+export function polygonAreaImagePx(canvasPoints, drawingImage) {
+  const imgPts = canvasPoints
+    .map((p) => canvasToImagePx(p, drawingImage))
+    .filter(Boolean);
+  if (imgPts.length < 3) return null;
+  let sum = 0;
+  const n = imgPts.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    sum += imgPts[i].x * imgPts[j].y - imgPts[j].x * imgPts[i].y;
+  }
+  return Math.abs(sum) / 2;
+}
+
+export function bboxMetricsFromCanvasPoints(canvasPoints, drawingImage, mmPerImagePx) {
+  if (!mmPerImagePx || !drawingImage || canvasPoints.length < 2) return null;
+  const imgPts = canvasPoints
+    .map((p) => canvasToImagePx(p, drawingImage))
+    .filter(Boolean);
+  if (!imgPts.length) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  imgPts.forEach((p) => {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  });
+  return {
+    widthM: ((maxX - minX) * mmPerImagePx) / 1000,
+    depthM: ((maxY - minY) * mmPerImagePx) / 1000,
+  };
 }
 
 /** 区画ポリゴンの頂点（キャンバス座標） */
@@ -198,9 +242,14 @@ export function formatZoneSizeShort(metrics) {
 
 export function formatScaleStatus(mmPerImagePx, summary = null) {
   if (summary?.widthM != null && summary?.depthM != null) {
-    const m2 = summary.knownM2 ? `（${summary.knownM2}㎡）` : "";
-    return `横 ${summary.widthM.toFixed(1)}m　縦 ${summary.depthM.toFixed(1)}m${m2}`;
+    const area =
+      summary.knownTsubo != null
+        ? `（${summary.knownTsubo}坪）`
+        : summary.knownM2
+          ? `（${summary.knownM2}㎡）`
+          : "";
+    return `横 ${summary.widthM.toFixed(1)}m　縦 ${summary.depthM.toFixed(1)}m${area}`;
   }
   if (!mmPerImagePx) return "未設定";
-  return `設定済み`;
+  return "設定済み";
 }

@@ -45,7 +45,7 @@
       </div>
 
       <div class="topbar-group draw-style">
-        <span class="topbar-label mini zone-active-label" id="zone-active-label">FWエリア</span>
+        <span class="topbar-label mini zone-active-label">区分: <span id="zone-active-label">FWエリア</span></span>
         <label class="topbar-label mini snap-label"><input type="checkbox" id="snap-grid" checked /> 吸着 <span class="snap-hint">(Shiftで微調整)</span></label>
       </div>
 
@@ -69,18 +69,6 @@
           </div>
         </div>
         <p class="panel-hint">区分を開く → <strong>区画を描く</strong> → 同じ名称でも何個でも配置可</p>
-        <div class="scale-panel">
-          <div class="panel-header-row">
-            <span class="panel-title sub">区画測定</span>
-            <span class="scale-badge tentative" id="scale-badge">未設定</span>
-          </div>
-          <label class="prop-field mini">
-            平米
-            <input type="number" id="scale-known-m2" placeholder="例: 75.93" min="0.01" step="0.01" inputmode="decimal" />
-          </label>
-          <button type="button" class="btn btn-primary btn-sm btn-block" id="btn-area-calibrate">縦横採寸</button>
-          <p class="scale-status" id="scale-status">未設定 — 図面の㎡を入力して縦横採寸</p>
-        </div>
         <div class="zone-custom-section">
           <div class="panel-header-row">
             <span class="panel-title sub">自作区分</span>
@@ -115,10 +103,20 @@
             <button type="button" class="btn btn-primary btn-xs zone-place-confirm" id="btn-zone-place-confirm">Enter で固定</button>
             <button type="button" class="btn btn-ghost btn-xs" id="btn-zone-place-cancel">Esc 取消</button>
           </div>
-          <div id="scale-calib-hud" class="scale-calib-hud" hidden>
-            <strong>縦横採寸</strong>
-            <span id="scale-calib-step">図面上で区画を囲んでください</span>
-            <span id="scale-calib-mm"></span>
+          <div id="scale-calib-hud" class="scale-calib-hud">
+            <div class="scale-calib-main">
+              <strong>初期測定</strong>
+              <label class="scale-calib-tsubo">
+                坪
+                <input type="number" id="scale-known-tsubo" placeholder="158.87" min="0.01" step="0.01" inputmode="decimal" />
+              </label>
+              <button type="button" class="btn btn-primary btn-xs" id="btn-area-calibrate">縦横採寸</button>
+              <button type="button" class="btn btn-primary btn-xs" id="btn-scale-apply" hidden>確定</button>
+              <button type="button" class="btn btn-ghost btn-xs" id="btn-scale-cancel" hidden>取消</button>
+              <span class="scale-badge tentative" id="scale-badge">未設定</span>
+            </div>
+            <p class="scale-calib-step" id="scale-calib-step">縦横採寸 → 敷地の角をクリック → 坪を入力 → 確定</p>
+            <p class="scale-calib-status" id="scale-status"></p>
           </div>
         </div>
         <footer id="status" class="status-bar">準備中… — 変更は自動保存されます</footer>
@@ -175,7 +173,7 @@
             <li>区画を<strong>クリック</strong> → 修正 or 削除を選択</li>
             <li><strong>↖ 選択</strong>で図面をクリック → 四隅ドラッグでサイズ変更（区画も連動）</li>
             <li>描画中・確定後とも<strong>各辺の長さ (m)</strong>を表示</li>
-            <li>区画に<strong>㎡・坪・横縦</strong>が自動表示（左の区画測定）</li>
+            <li>区画に<strong>㎡・坪・横縦</strong>が自動表示（下の<strong>初期測定</strong>で坪を入れて縦横採寸）</li>
             <li>左の<strong>リニューアル記号</strong>で取り壊し✕・制作＋・移動元A/移動先→A</li>
             <li>フック上部の<strong>展開・折畳</strong>で全体表示</li>
           </ul>

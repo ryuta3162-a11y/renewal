@@ -577,6 +577,221 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
   return cleanup;
 }
 
+const CALIB_STYLE = {
+  fill: "rgba(245,158,11,0.2)",
+  stroke: "#f59e0b",
+  guideStroke: "#f59e0b",
+};
+
+/** 初期測定用 — 角クリックで敷地全体を囲む（区画は作らない） */
+export function enableCalibPolygonDraw(canvas, onPointsDone) {
+  const points = [];
+  let previewLines = [];
+  let vertexDots = [];
+  let rubberLine = null;
+  let previewPoly = null;
+  let lastClickAt = 0;
+
+  function closeScreenPx() {
+    return 26 / (canvas.getZoom() || 1);
+  }
+
+  function isNearFirstPoint(raw, first) {
+    return Math.hypot(raw.x - first.x, raw.y - first.y) < closeScreenPx();
+  }
+
+  function highlightCloseTarget() {
+    if (vertexDots.length && points.length >= 3) {
+      vertexDots[0].set({
+        width: 16,
+        height: 16,
+        fill: CALIB_STYLE.guideStroke,
+        stroke: "#fff",
+        strokeWidth: 3,
+      });
+    }
+  }
+
+  function resetCloseTarget() {
+    if (vertexDots.length) {
+      vertexDots[0].set({
+        width: 8,
+        height: 8,
+        fill: CALIB_STYLE.guideStroke,
+        stroke: CALIB_STYLE.guideStroke,
+        strokeWidth: 2,
+      });
+    }
+  }
+
+  const handler = (opt) => {
+    const e = opt.e;
+    const raw = canvas.getPointer(e);
+    const ptr = snapPoint(raw, canvas, e);
+
+    if (e.type === "mousemove" && points.length) {
+      if (rubberLine) canvas.remove(rubberLine);
+      const last = points[points.length - 1];
+      rubberLine = new fabric.Line([last.x, last.y, ptr.x, ptr.y], {
+        stroke: CALIB_STYLE.guideStroke,
+        strokeWidth: 2,
+        strokeDashArray: [6, 4],
+        selectable: false,
+        evented: false,
+        _scalePreview: true,
+        _skipHistory: true,
+      });
+      canvas.add(rubberLine);
+
+      if (points.length >= 2) {
+        if (previewPoly) canvas.remove(previewPoly);
+        previewPoly = new fabric.Polygon(
+          [...points, ptr].map((p) => ({ x: p.x, y: p.y })),
+          {
+            fill: CALIB_STYLE.fill,
+            stroke: CALIB_STYLE.stroke,
+            strokeWidth: 2,
+            selectable: false,
+            evented: false,
+            _scalePreview: true,
+            _skipHistory: true,
+          }
+        );
+        canvas.add(previewPoly);
+      }
+      canvas.requestRenderAll();
+    }
+
+    if (e.type !== "mouseup" && e.type !== "mousedown") return;
+
+    if (e.type === "mousedown" && e.button === 2) {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelDraw();
+      return;
+    }
+
+    if (e.type === "mousedown" && e.button === 0) {
+      const now = Date.now();
+      const isDouble = now - lastClickAt < 350;
+      lastClickAt = now;
+
+      if (points.length >= 3 && (isDouble || isNearFirstPoint(raw, points[0]))) {
+        finish();
+        return;
+      }
+
+      points.push(ptr);
+      const dot = new fabric.Rect({
+        left: ptr.x,
+        top: ptr.y,
+        width: points.length === 1 ? 8 : 6,
+        height: points.length === 1 ? 8 : 6,
+        fill: points.length === 1 ? CALIB_STYLE.guideStroke : "#fff",
+        stroke: CALIB_STYLE.guideStroke,
+        strokeWidth: 2,
+        originX: "center",
+        originY: "center",
+        selectable: false,
+        evented: false,
+        _scalePreview: true,
+        _skipHistory: true,
+      });
+      vertexDots.push(dot);
+      canvas.add(dot);
+
+      if (points.length > 1) {
+        const prev = points[points.length - 2];
+        const line = new fabric.Line([prev.x, prev.y, ptr.x, ptr.y], {
+          stroke: CALIB_STYLE.guideStroke,
+          strokeWidth: 2,
+          selectable: false,
+          evented: false,
+          _scalePreview: true,
+          _skipHistory: true,
+        });
+        previewLines.push(line);
+        canvas.add(line);
+      }
+      if (points.length >= 3) highlightCloseTarget();
+      canvas.requestRenderAll();
+    }
+  };
+
+  const dblHandler = (opt) => {
+    if (opt.e?.button !== 0) return;
+    if (points.length >= 3) {
+      opt.e.preventDefault?.();
+      finish();
+    }
+  };
+
+  const keyHandler = (e) => {
+    if (e.key === "Enter" && points.length >= 3) {
+      e.preventDefault();
+      finish();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancelDraw();
+    }
+    if (e.key === "Backspace" && points.length) {
+      e.preventDefault();
+      const lastDot = vertexDots.pop();
+      if (lastDot) canvas.remove(lastDot);
+      if (previewLines.length) canvas.remove(previewLines.pop());
+      points.pop();
+      if (rubberLine) {
+        canvas.remove(rubberLine);
+        rubberLine = null;
+      }
+      if (previewPoly) {
+        canvas.remove(previewPoly);
+        previewPoly = null;
+      }
+      if (points.length >= 3) highlightCloseTarget();
+      else resetCloseTarget();
+      canvas.requestRenderAll();
+    }
+  };
+
+  function cancelDraw() {
+    cleanup();
+    onPointsDone?.(null);
+  }
+
+  function cleanup() {
+    canvas.off("mouse:down", handler);
+    canvas.off("mouse:move", handler);
+    canvas.off("mouse:dblclick", dblHandler);
+    document.removeEventListener("keydown", keyHandler);
+    [...previewLines, ...vertexDots, rubberLine, previewPoly]
+      .filter(Boolean)
+      .forEach((o) => canvas.remove(o));
+    previewLines = [];
+    vertexDots = [];
+    rubberLine = null;
+    previewPoly = null;
+    points.length = 0;
+    canvas.requestRenderAll();
+  }
+
+  function finish() {
+    if (points.length < 3) return;
+    resetCloseTarget();
+    const donePoints = [...points];
+    cleanup();
+    onPointsDone?.(donePoints);
+  }
+
+  canvas.on("mouse:down", handler);
+  canvas.on("mouse:move", handler);
+  canvas.on("mouse:dblclick", dblHandler);
+  document.addEventListener("keydown", keyHandler);
+
+  return cleanup;
+}
+
 /** 途中で残った区画プレビューを除去 */
 export function removeOrphanZonePreviews(canvas) {
   canvas.getObjects()

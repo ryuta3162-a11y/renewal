@@ -14,6 +14,7 @@ import {
   ZONE_PRESETS,
   getAllZonePresets,
   enableZoneDraw,
+  enableCalibPolygonDraw,
   updateZoneLabel,
   updateZoneColors,
   upgradeZoneObject,
@@ -36,7 +37,10 @@ import {
 import { pdfToDataUrl } from "./pdf-loader.js";
 import {
   canvasToImagePx,
-  mmPerImagePxFromAreaMatch,
+  mmPerImagePxFromAreaPx,
+  polygonAreaImagePx,
+  bboxMetricsFromCanvasPoints,
+  M2_PER_TSUBO,
   computeZoneMetrics,
   computeZoneMetricsFromCanvasPoints,
   segmentMetrics,
@@ -109,6 +113,7 @@ let currentMmPerImagePx = null;
 let scaleCalibrated = false;
 let scaleCalibSummary = null;
 let scaleCalibCleanup = null;
+let scaleCalibPendingPoints = null;
 let autoSaveTimer = null;
 let lastSavedAt = null;
 const history = [];
@@ -429,6 +434,7 @@ async function loadDrawing(id) {
     await restoreDesign(pageKey(), saved, { skipViewport: true });
     applySavedViewport(saved?.viewport);
     if (!currentMmPerImagePx) tryDefaultScale();
+    fillScaleTsuboFromSheet();
     refreshAllZoneMetrics();
     updateScaleUI();
     isRestoringHistory = false;
@@ -614,6 +620,7 @@ async function reloadPage() {
   await restoreDesign(pageKey(), saved, { skipViewport: true });
   applySavedViewport(saved?.viewport);
   if (!currentMmPerImagePx) tryDefaultScale();
+  fillScaleTsuboFromSheet();
   refreshAllZoneMetrics();
   updateScaleUI();
   isRestoringHistory = false;
@@ -774,7 +781,7 @@ function finalizeNewZone(zone) {
     if (currentMmPerImagePx) {
       flashStatus(`「${name}」を固定しました（各辺の長さ・㎡を表示）`);
     } else {
-      flashStatus(`「${name}」を固定しました — 左パネルで区画測定するとサイズが出ます`);
+      flashStatus(`「${name}」を固定しました — 下の初期測定を行うとサイズが出ます`);
     }
   } catch (err) {
     console.error(err);
@@ -826,13 +833,34 @@ function ensureDrawingScale() {
   return !!currentMmPerImagePx;
 }
 
-function showScaleCalibHud(show, stepText = "", m2Text = "") {
-  const hud = document.getElementById("scale-calib-hud");
+function removeScalePreviews() {
+  canvas
+    ?.getObjects()
+    .filter((o) => o._scalePreview)
+    .forEach((o) => canvas.remove(o));
+  canvas?.requestRenderAll();
+}
+
+function fillScaleTsuboFromSheet() {
+  const input = document.getElementById("scale-known-tsubo");
+  if (!input || input.value) return;
+  const sheet = getCurrentSheet(currentDrawingId);
+  if (sheet?.planAreaTsubo) input.value = sheet.planAreaTsubo;
+}
+
+function setScaleCalibStep(text) {
   const stepEl = document.getElementById("scale-calib-step");
-  const mmEl = document.getElementById("scale-calib-mm");
-  if (hud) hud.hidden = !show;
-  if (stepEl && stepText) stepEl.textContent = stepText;
-  if (mmEl) mmEl.textContent = m2Text;
+  if (stepEl && text) stepEl.textContent = text;
+}
+
+function setScaleCalibMode(mode) {
+  const applyBtn = document.getElementById("btn-scale-apply");
+  const cancelBtn = document.getElementById("btn-scale-cancel");
+  const calibBtn = document.getElementById("btn-area-calibrate");
+  if (applyBtn) applyBtn.hidden = mode !== "ready";
+  if (cancelBtn) cancelBtn.hidden = mode === "idle";
+  if (calibBtn) calibBtn.disabled = mode === "drawing";
+  canvasWrap?.classList.toggle("scale-calibrating", mode === "drawing");
 }
 
 function updateScaleUI() {
@@ -840,7 +868,7 @@ function updateScaleUI() {
   const badge = document.getElementById("scale-badge");
   if (!el) return;
   if (!currentMmPerImagePx) {
-    el.textContent = "未設定 — 図面の㎡を入力して縦横採寸";
+    el.textContent = "";
     if (badge) {
       badge.textContent = "未設定";
       badge.className = "scale-badge tentative";
@@ -854,7 +882,7 @@ function updateScaleUI() {
       badge.className = "scale-badge ok";
     }
   } else {
-    el.innerHTML = `<span class="scale-warn">※仮の値</span> — ㎡を入力して縦横採寸してください`;
+    el.textContent = "※仮の値 — 下の初期測定を行ってください";
     if (badge) {
       badge.textContent = "仮";
       badge.className = "scale-badge tentative";
@@ -862,140 +890,116 @@ function updateScaleUI() {
   }
 }
 
+function cancelScaleCalibration() {
+  if (scaleCalibCleanup) {
+    scaleCalibCleanup();
+    scaleCalibCleanup = null;
+  }
+  scaleCalibPendingPoints = null;
+  removeScalePreviews();
+  setScaleCalibMode("idle");
+  setScaleCalibStep("縦横採寸 → 敷地の角をクリック → 坪を入力 → 確定");
+}
+
+function applyScaleFromPolygon(tsubo) {
+  if (!scaleCalibPendingPoints?.length) {
+    flashStatus("先に縦横採寸で敷地全体を囲んでください");
+    return false;
+  }
+  if (!tsubo || tsubo <= 0) {
+    flashStatus("坪を半角数字で入力してください");
+    document.getElementById("scale-known-tsubo")?.focus();
+    return false;
+  }
+  if (!drawingImage) return false;
+
+  const knownM2 = tsubo * M2_PER_TSUBO;
+  const areaPx = polygonAreaImagePx(scaleCalibPendingPoints, drawingImage);
+  const mmPerPx = mmPerImagePxFromAreaPx(knownM2, areaPx);
+  if (!mmPerPx) {
+    flashStatus("採寸に失敗しました。もう一度お試しください");
+    return false;
+  }
+
+  const bbox = bboxMetricsFromCanvasPoints(
+    scaleCalibPendingPoints,
+    drawingImage,
+    mmPerPx
+  );
+  currentMmPerImagePx = mmPerPx;
+  scaleCalibrated = true;
+  scaleCalibSummary = {
+    widthM: bbox?.widthM ?? 0,
+    depthM: bbox?.depthM ?? 0,
+    knownM2,
+    knownTsubo: tsubo,
+  };
+  cancelScaleCalibration();
+  refreshAllZoneMetrics();
+  updateScaleUI();
+  refreshZoneHooksList();
+  pushHistory();
+  scheduleAutoSave();
+  flashStatus(
+    `初期測定完了 — 横 ${scaleCalibSummary.widthM.toFixed(1)}m　縦 ${scaleCalibSummary.depthM.toFixed(1)}m（${tsubo}坪）`
+  );
+  return true;
+}
+
 function setupScaleUI() {
   document.getElementById("btn-area-calibrate")?.addEventListener("click", () => {
-    const m2 = parseFloat(document.getElementById("scale-known-m2")?.value);
-    if (!m2 || m2 <= 0) {
-      flashStatus("図面に書いてある㎡を半角数字で入力してください");
-      return;
-    }
     if (!drawingImage) {
       flashStatus("図面を読み込んでから採寸してください");
       return;
     }
-    startAreaCalibration(m2);
+    startCalibPolygonDraw();
+  });
+
+  document.getElementById("btn-scale-apply")?.addEventListener("click", () => {
+    const tsubo = parseFloat(document.getElementById("scale-known-tsubo")?.value);
+    applyScaleFromPolygon(tsubo);
+  });
+
+  document.getElementById("btn-scale-cancel")?.addEventListener("click", () => {
+    cancelScaleCalibration();
+    flashStatus("初期測定をキャンセルしました");
+  });
+
+  document.getElementById("scale-known-tsubo")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && scaleCalibPendingPoints?.length) {
+      e.preventDefault();
+      const tsubo = parseFloat(e.target.value);
+      applyScaleFromPolygon(tsubo);
+    }
   });
 }
 
-function startAreaCalibration(knownM2) {
-  if (scaleCalibCleanup) scaleCalibCleanup();
+function startCalibPolygonDraw() {
+  cancelScaleCalibration();
   if (polygonCleanup) {
     polygonCleanup();
     polygonCleanup = null;
   }
   removeOrphanZonePreviews(canvas);
 
-  let dragStart = null;
-  let preview = null;
+  setScaleCalibMode("drawing");
+  setScaleCalibStep("敷地の角をクリック（始点をクリック or Enter で閉じる · Escで取消）");
 
-  const cleanup = () => {
-    canvas.off("mouse:down", onDown);
-    canvas.off("mouse:move", onMove);
-    canvas.off("mouse:up", onUp);
-    document.removeEventListener("keydown", keyHandler);
-    if (preview) canvas.remove(preview);
-    preview = null;
-    dragStart = null;
-    canvas.requestRenderAll();
+  scaleCalibCleanup = enableCalibPolygonDraw(canvas, (points) => {
     scaleCalibCleanup = null;
-    showScaleCalibHud(false);
-    canvasWrap?.classList.remove("scale-calibrating");
-  };
-
-  scaleCalibCleanup = cleanup;
-  showScaleCalibHud(true, "ドラッグで区画を囲んでください", `${knownM2}㎡`);
-  canvasWrap?.classList.add("scale-calibrating");
-
-  const onDown = (opt) => {
-    const e = opt.e;
-    if (e.button !== 0) return;
-    dragStart = canvas.getPointer(e);
-    if (preview) canvas.remove(preview);
-    preview = new fabric.Rect({
-      left: dragStart.x,
-      top: dragStart.y,
-      width: 0,
-      height: 0,
-      fill: "rgba(245,158,11,0.15)",
-      stroke: "#f59e0b",
-      strokeWidth: 2,
-      strokeDashArray: [8, 4],
-      selectable: false,
-      evented: false,
-      _skipHistory: true,
-      _scalePreview: true,
-    });
-    canvas.add(preview);
-  };
-
-  const onMove = (opt) => {
-    if (!dragStart || !preview) return;
-    const ptr = canvas.getPointer(opt.e);
-    preview.set({
-      width: Math.abs(ptr.x - dragStart.x),
-      height: Math.abs(ptr.y - dragStart.y),
-      left: Math.min(ptr.x, dragStart.x),
-      top: Math.min(ptr.y, dragStart.y),
-    });
-    canvas.requestRenderAll();
-  };
-
-  const onUp = () => {
-    if (!dragStart || !preview) return;
-    const rawW = preview.width;
-    const rawH = preview.height;
-    if (rawW < 12 || rawH < 12) {
-      if (preview) canvas.remove(preview);
-      preview = null;
-      dragStart = null;
-      canvas.requestRenderAll();
-      flashStatus("もう一度、区画全体を囲んでください");
+    if (!points?.length) {
+      cancelScaleCalibration();
+      flashStatus("初期測定をキャンセルしました");
       return;
     }
+    scaleCalibPendingPoints = points;
+    setScaleCalibMode("ready");
+    setScaleCalibStep("図面の坪を半角数字で入力して「確定」");
+    document.getElementById("scale-known-tsubo")?.focus();
+    flashStatus("敷地を囲みました — 坪を入力して確定してください");
+  });
 
-    const tl = canvasToImagePx({ x: preview.left, y: preview.top }, drawingImage);
-    const br = canvasToImagePx(
-      { x: preview.left + rawW, y: preview.top + rawH },
-      drawingImage
-    );
-    const widthPx = Math.abs(br.x - tl.x);
-    const heightPx = Math.abs(br.y - tl.y);
-    const mmPerPx = mmPerImagePxFromAreaMatch(knownM2, widthPx, heightPx);
-    if (!mmPerPx) {
-      cleanup();
-      flashStatus("採寸に失敗しました。もう一度お試しください");
-      return;
-    }
-
-    const widthM = (widthPx * mmPerPx) / 1000;
-    const depthM = (heightPx * mmPerPx) / 1000;
-    currentMmPerImagePx = mmPerPx;
-    scaleCalibrated = true;
-    scaleCalibSummary = { widthM, depthM, knownM2 };
-    cleanup();
-    refreshAllZoneMetrics();
-    updateScaleUI();
-    refreshZoneHooksList();
-    pushHistory();
-    scheduleAutoSave();
-    flashStatus(
-      `設定完了 — 横 ${widthM.toFixed(1)}m　縦 ${depthM.toFixed(1)}m（${knownM2}㎡）`
-    );
-  };
-
-  const keyHandler = (e) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      cleanup();
-      flashStatus("縦横採寸をキャンセルしました");
-    }
-  };
-
-  canvas.on("mouse:down", onDown);
-  canvas.on("mouse:move", onMove);
-  canvas.on("mouse:up", onUp);
-  document.addEventListener("keydown", keyHandler);
-  flashStatus(`${knownM2}㎡ の区画を、図面上でドラッグして囲んでください（Escで取消）`);
+  flashStatus("敷地の角をクリックして全体を囲んでください（始点で閉じる / Enter）");
 }
 
 const HOOK_STATE_KEY = "renewal-zone-hook-collapsed";
@@ -1800,7 +1804,7 @@ function showZoneTooltip(e, zone) {
   const sizeLine = formatZoneSizeText(zone._zoneMetrics);
   const sizeHtml = sizeLine
     ? `<span class="zone-tip-size">${esc(sizeLine.replace("\n", " / "))}</span>`
-    : `<span style="color:var(--muted)">未設定 — 左パネルで区画測定</span>`;
+    : `<span style="color:var(--muted)">未設定 — 下の初期測定を行ってください</span>`;
   zoneTooltip.innerHTML = memo
     ? `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}${esc(memo)}`
     : `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}<span style="color:var(--muted)">クリックで修正・削除</span>`;
@@ -2324,7 +2328,7 @@ function updateProps() {
     const metrics = z._zoneMetrics;
     const sizeBlock = metrics
       ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(z)).replace("\n", " · "))}</p>`
-      : `<p class="prop-meta" style="color:var(--muted)">サイズ: 未設定（区画測定）</p>`;
+      : `<p class="prop-meta" style="color:var(--muted)">サイズ: 未設定（下の初期測定）</p>`;
     content.innerHTML = `
       <p class="prop-type">区画 — 配置中</p>
       <p class="prop-meta">${esc(z.zoneName || "区画")}</p>
@@ -2393,7 +2397,7 @@ function updateProps() {
     const metrics = obj._zoneMetrics;
     const sizeBlock = metrics
       ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(obj)).replace("\n", " · "))}</p>`
-      : `<p class="prop-meta" style="color:var(--muted)">サイズ: 未設定（区画測定）</p>`;
+      : `<p class="prop-meta" style="color:var(--muted)">サイズ: 未設定（下の初期測定）</p>`;
     content.innerHTML = `
       <p class="prop-type">区画</p>
       <p class="prop-meta">${esc(obj.zoneName || "区画")}</p>
@@ -2702,6 +2706,15 @@ function exportPng() {
 function setupKeyboard() {
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select")) return;
+
+    if (scaleCalibCleanup || scaleCalibPendingPoints) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelScaleCalibration();
+        flashStatus("初期測定をキャンセルしました");
+        return;
+      }
+    }
 
     if (pendingPlacementZone) {
       if (e.key === "Enter") {
