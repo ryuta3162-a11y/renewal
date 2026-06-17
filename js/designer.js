@@ -132,8 +132,11 @@ const historyLimit = 50;
 let isRestoringHistory = false;
 let lastPropsTargetKey = null;
 let clipboardObjectData = null;
+let marqueeDrag = null;
+let marqueeOverlay = null;
 
 const PASTE_OFFSET = 24;
+const MARQUEE_MIN_PX = 4;
 
 init();
 async function init() {
@@ -167,18 +170,126 @@ function waitForLayout() {
   });
 }
 
-function collapseMultiSelection() {
-  if (!canvas) return false;
-  const active = canvas.getActiveObject();
-  if (!active || active.type !== "activeSelection") return false;
-  const objs = active.getObjects();
-  if (objs.length <= 1) return false;
-  const zones = objs.filter((o) => o.objectType === "zone");
-  const pick = zones.length ? zones[zones.length - 1] : objs[objs.length - 1];
-  canvas.discardActiveObject();
-  canvas.setActiveObject(pick);
-  canvas.requestRenderAll();
+function isMarqueeSelectAllowed() {
+  if (!canvas || activeTool !== "select") return false;
+  if (pendingPlacementZone || zoneVertexEditCleanup) return false;
+  if (scaleCalibCleanup || scaleCalibPendingPoints) return false;
   return true;
+}
+
+function getMarqueeSelectableObjects() {
+  return canvas.getObjects().filter((o) => {
+    if (!o.visible || o._marqueeOverlay) return false;
+    if (o.objectType === "drawing" || o.objectType === "workBoundary") return false;
+    if (o._zonePendingFix || o._zoneVertexEdit || o._scalePreview || o._zonePreview) return false;
+    if (o.objectType === "part") {
+      const isMark = !!o.partMarkRole || o._objects?.some((c) => c.type === "text" && (c.text === "✕" || c.text === "○"));
+      if (isMark && !MARKS_UI_ENABLED) return false;
+      if (!isMark && !MACHINES_UI_ENABLED) return false;
+    }
+    return o.selectable !== false && o.evented !== false;
+  });
+}
+
+function objectInMarqueeRect(obj, left, top, width, height) {
+  obj.setCoords();
+  const b = obj.getBoundingRect(true, true);
+  const r = left + width;
+  const btm = top + height;
+  return !(b.left > r || b.left + b.width < left || b.top > btm || b.top + b.height < top);
+}
+
+function cancelMarqueeDrag() {
+  marqueeDrag = null;
+  if (marqueeOverlay && canvas) {
+    canvas.remove(marqueeOverlay);
+    marqueeOverlay = null;
+    canvas.requestRenderAll();
+  }
+}
+
+function startMarqueeDrag(ptr) {
+  cancelMarqueeDrag();
+  marqueeDrag = {
+    startX: ptr.x,
+    startY: ptr.y,
+    left: ptr.x,
+    top: ptr.y,
+    width: 0,
+    height: 0,
+    moved: false,
+  };
+}
+
+function updateMarqueeDrag(ptr) {
+  if (!marqueeDrag || !canvas) return;
+  const left = Math.min(marqueeDrag.startX, ptr.x);
+  const top = Math.min(marqueeDrag.startY, ptr.y);
+  const width = Math.abs(ptr.x - marqueeDrag.startX);
+  const height = Math.abs(ptr.y - marqueeDrag.startY);
+  marqueeDrag.left = left;
+  marqueeDrag.top = top;
+  marqueeDrag.width = width;
+  marqueeDrag.height = height;
+  if (width >= MARQUEE_MIN_PX || height >= MARQUEE_MIN_PX) marqueeDrag.moved = true;
+  if (!marqueeDrag.moved) return;
+
+  if (!marqueeOverlay) {
+    marqueeOverlay = new fabric.Rect({
+      left,
+      top,
+      width,
+      height,
+      fill: "rgba(59, 130, 246, 0.1)",
+      stroke: "#60a5fa",
+      strokeWidth: 1.5,
+      strokeDashArray: [5, 4],
+      selectable: false,
+      evented: false,
+      objectCaching: false,
+      _marqueeOverlay: true,
+      _skipHistory: true,
+    });
+    canvas.add(marqueeOverlay);
+  } else {
+    marqueeOverlay.set({ left, top, width, height });
+  }
+  marqueeOverlay.bringToFront();
+  canvas.requestRenderAll();
+}
+
+function applyMarqueeSelection(bounds) {
+  if (!canvas || !bounds?.moved) return;
+  const { left, top, width, height } = bounds;
+  if (width < MARQUEE_MIN_PX && height < MARQUEE_MIN_PX) return;
+
+  const hits = getMarqueeSelectableObjects().filter((o) =>
+    objectInMarqueeRect(o, left, top, width, height)
+  );
+
+  if (!hits.length) {
+    clearCanvasSelection();
+    flashStatus("範囲内に選択できるものがありません");
+    return;
+  }
+
+  if (hits.length === 1) {
+    canvas.setActiveObject(hits[0]);
+  } else {
+    canvas.setActiveObject(wrapMultiSelection(hits));
+  }
+  hits.forEach(applyInteractiveControls);
+  updateProps();
+  canvas.requestRenderAll();
+  flashStatus(`${hits.length}件を選択`);
+}
+
+function finishMarqueeDrag(ptr) {
+  if (!marqueeDrag) return { clicked: true };
+  if (ptr) updateMarqueeDrag(ptr);
+  const result = { ...marqueeDrag, clicked: !marqueeDrag.moved };
+  cancelMarqueeDrag();
+  return result;
 }
 
 function initCanvas() {
@@ -196,7 +307,16 @@ function initCanvas() {
   canvas.on("object:modified", (e) => {
     if (isRestoringHistory) return;
     if (e.target?.type === "activeSelection") {
-      collapseMultiSelection();
+      e.target.getObjects().forEach((obj) => {
+        if (obj.objectType === "zone") {
+          refreshZoneOnCanvas(obj, computeZoneMetricsFor(obj));
+        }
+        applyInteractiveControls(obj);
+      });
+      refreshZoneHooksList();
+      pushHistory();
+      updateProps();
+      scheduleAutoSave();
       return;
     }
     if (e.target?.objectType === "drawing") {
@@ -256,7 +376,12 @@ function initCanvas() {
   });
   canvas.on("object:moving", (e) => {
     if (e.target?.type === "activeSelection") {
-      collapseMultiSelection();
+      e.target.getObjects().forEach((obj) => {
+        if (obj.objectType === "zone") {
+          refreshZoneOnCanvas(obj, computeZoneMetricsFor(obj));
+        }
+      });
+      updatePropsLive();
       return;
     }
     if (e.target?.objectType === "zone") {
@@ -269,10 +394,6 @@ function initCanvas() {
       canvas.discardActiveObject();
       return;
     }
-    if (collapseMultiSelection()) {
-      updateProps();
-      return;
-    }
     if (pendingPlacementZone && e.selected?.[0] !== pendingPlacementZone) {
       canvas.setActiveObject(pendingPlacementZone);
     }
@@ -282,10 +403,6 @@ function initCanvas() {
   canvas.on("selection:updated", (e) => {
     if (zoneVertexEditCleanup) {
       canvas.discardActiveObject();
-      return;
-    }
-    if (collapseMultiSelection()) {
-      updateProps();
       return;
     }
     if (pendingPlacementZone && e.selected?.[0] !== pendingPlacementZone) {
@@ -575,7 +692,7 @@ function loadDrawingImage(dataUrl) {
         drawingImage = img;
         canvas.add(img);
         img.sendToBack();
-        configureDrawingResize(img, activeTool === "select");
+        configureDrawingResize(img, activeTool === "drawing");
         resolve(img);
       },
       loadOpts
@@ -611,8 +728,47 @@ function fitDrawing(resetView = false) {
 }
 
 function updateDrawingInteractivity() {
-  configureDrawingResize(drawingImage, activeTool === "select");
+  configureDrawingResize(drawingImage, activeTool === "drawing");
   canvas?.requestRenderAll();
+}
+
+function setUserObjectsInteractive(enabled) {
+  canvas?.getObjects().forEach((o) => {
+    if (o.objectType === "drawing" || o.objectType === "workBoundary") return;
+    if (o._marqueeOverlay || o._zoneVertexEdit) return;
+    o.set({ selectable: enabled, evented: enabled });
+  });
+}
+
+function startDrawingAdjustMode() {
+  setUserObjectsInteractive(false);
+  canvas.discardActiveObject();
+  if (drawingImage) {
+    if (!drawingTransformBefore) {
+      drawingTransformBefore = captureDrawingState(drawingImage);
+    }
+    canvas.setActiveObject(drawingImage);
+  }
+  updateProps();
+  flashStatus("図面の角をドラッグでサイズ変更 · Esc で終了");
+}
+
+function finishDrawingAdjustMode() {
+  setUserObjectsInteractive(true);
+  if (drawingTransformBefore && drawingImage) {
+    onDrawingTransformEnd();
+  } else {
+    configureDrawingResize(drawingImage, false);
+  }
+  canvas.discardActiveObject();
+  updateProps();
+}
+
+function wrapMultiSelection(hits) {
+  if (hits.length === 1) return hits[0];
+  const sel = new fabric.ActiveSelection(hits, { canvas });
+  sel.set({ lockScaling: true, lockRotation: true });
+  return sel;
 }
 
 function onDrawingTransformEnd() {
@@ -631,7 +787,7 @@ function onDrawingTransformEnd() {
 function applySavedDrawingTransform(t) {
   if (!drawingImage || !t) return false;
   applyDrawingTransform(drawingImage, t);
-  configureDrawingResize(drawingImage, activeTool === "select");
+    configureDrawingResize(drawingImage, false);
   return true;
 }
 
@@ -651,6 +807,7 @@ function snapshotUserObjects() {
 function shouldStartPan(opt) {
   const e = opt.e;
   if (e.button === 2) return false;
+  if (activeTool === "drawing") return false;
   if (e.button === 1) return true;
   if (activeTool === "pan" && e.button === 0) return true;
   if (spaceDown && e.button === 0) return true;
@@ -2195,6 +2352,11 @@ function onCanvasMouseDown(opt) {
   const e = opt.e;
 
   if (e.button === 2) {
+    if (isMarqueeSelectAllowed()) {
+      e.preventDefault();
+      startMarqueeDrag(canvas.getPointer(e));
+      return;
+    }
     handleCanvasRightClick(opt);
     return;
   }
@@ -2204,7 +2366,6 @@ function onCanvasMouseDown(opt) {
   if (activeTool === "zone") return;
 
   if (e.button === 0 && activeTool === "select" && opt.target?.objectType === "zone") {
-    collapseMultiSelection();
     canvas.setActiveObject(opt.target);
     return;
   }
@@ -2243,6 +2404,15 @@ function onCanvasMouseDown(opt) {
 function onCanvasMouseMove(opt) {
   const e = opt.e;
 
+  if (marqueeDrag) {
+    if (!(e.buttons & 2)) {
+      finishMarqueeDrag(canvas.getPointer(e));
+      return;
+    }
+    updateMarqueeDrag(canvas.getPointer(e));
+    return;
+  }
+
   if (scaleCalibCleanup) return;
 
   if (isPanning && lastPan) {
@@ -2280,6 +2450,16 @@ function onCanvasDoubleClick(opt) {
 }
 
 async function onCanvasMouseUp(opt) {
+  if (marqueeDrag) {
+    const result = finishMarqueeDrag(canvas.getPointer(opt.e));
+    if (result.clicked) {
+      handleCanvasRightClick(opt);
+    } else {
+      applyMarqueeSelection(result);
+    }
+    return;
+  }
+
   if (scaleCalibCleanup) return;
 
   if (isPanning) {
@@ -2511,10 +2691,14 @@ function detachZonePolygonDraw() {
 
 function setTool(tool) {
   if (pendingPlacementZone && tool !== "select") return;
+  const wasDrawingAdjust = activeTool === "drawing";
   activeTool = tool;
   if (tool !== "zone") detachZonePolygonDraw();
   if (tool === "zone" || tool === "pan") {
     canvas.discardActiveObject();
+  }
+  if (wasDrawingAdjust && tool !== "drawing") {
+    finishDrawingAdjustMode();
   }
   document.querySelectorAll("[data-tool]").forEach((b) => {
     b.classList.toggle("active", b.dataset.tool === tool);
@@ -2529,6 +2713,9 @@ function setTool(tool) {
     } else {
       attachZonePolygonDraw();
     }
+  } else if (tool === "drawing") {
+    canvas.skipTargetFind = false;
+    startDrawingAdjustMode();
   } else if (tool === "place" && canPlaceParts()) {
     canvas.skipTargetFind = false;
   } else if (tool === "pan") {
@@ -2555,6 +2742,10 @@ function updateCanvasCursor() {
   }
   if (activeTool === "zone") {
     canvas.setCursor("crosshair");
+    return;
+  }
+  if (activeTool === "drawing") {
+    canvas.setCursor("nwse-resize");
     return;
   }
   if (pendingPlacementZone) {
@@ -2843,6 +3034,19 @@ function updateProps() {
     return;
   }
 
+  if (obj.type === "activeSelection") {
+    lastPropsTargetKey = "multi";
+    form.hidden = true;
+    const items = obj.getObjects();
+    const zoneCount = items.filter((o) => o.objectType === "zone").length;
+    const detail = zoneCount > 0 ? `（区画 ${zoneCount}件）` : "";
+    content.innerHTML = `
+      <p class="prop-meta"><strong>${items.length}件</strong>を選択中${esc(detail)}</p>
+      <p class="prop-meta props-hint">まとめて移動 · Delete で削除 · Esc で解除</p>
+    `;
+    return;
+  }
+
   if (obj.objectType === "drawing") {
     const key = "drawing";
     const sameTarget = lastPropsTargetKey === key;
@@ -2852,9 +3056,14 @@ function updateProps() {
     const pct = Math.round((obj.scaleX || 1) * 100);
     const w = Math.round(obj.getScaledWidth());
     const h = Math.round(obj.getScaledHeight());
+    const adjustHint =
+      activeTool === "drawing"
+        ? `<p class="prop-meta props-hint">角をドラッグでサイズ変更 · Esc で終了</p>`
+        : "";
     content.innerHTML = `
       <p class="prop-meta">${pct}% · ${w}×${h}px</p>
-      <button class="btn btn-ghost btn-block btn-sm" id="btn-fit-drawing">全体</button>
+      ${adjustHint}
+      <button class="btn btn-ghost btn-block btn-sm" id="btn-fit-drawing">全体にフィット</button>
     `;
     document.getElementById("btn-fit-drawing")?.addEventListener("click", () => {
       fitDrawing(true);
@@ -3428,6 +3637,12 @@ function setupKeyboard() {
       }
     }
 
+    if (e.key === "Escape" && activeTool === "drawing") {
+      e.preventDefault();
+      setTool("select");
+      return;
+    }
+
     if (e.key === "Escape" && activeTool === "select" && canvas.getActiveObject()) {
       e.preventDefault();
       clearCanvasSelection();
@@ -3458,6 +3673,7 @@ function setupKeyboard() {
     if (e.key === "z" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
     else if (e.key === "z" || e.key === "Z") setTool("zone");
     if (e.key === "v" || e.key === "V") setTool("select");
+    if (e.key === "d" || e.key === "D") setTool("drawing");
     if (e.key === "h" || e.key === "H") setTool("pan");
     handleArrowKeyDown(e);
   });
