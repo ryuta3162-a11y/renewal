@@ -40,6 +40,25 @@ export function isValidDrawingTransform(t) {
   return true;
 }
 
+/** 図面上（PDF画像の範囲内）か — キャンバス座標 */
+export function getDrawingCanvasBounds(img) {
+  if (!img) return null;
+  img.setCoords();
+  const b = img.getBoundingRect(true, true);
+  return {
+    left: b.left,
+    top: b.top,
+    right: b.left + b.width,
+    bottom: b.top + b.height,
+  };
+}
+
+export function isPointInsideDrawing(ptr, img) {
+  const b = getDrawingCanvasBounds(img);
+  if (!b) return true;
+  return ptr.x >= b.left && ptr.x <= b.right && ptr.y >= b.top && ptr.y <= b.bottom;
+}
+
 /** 図面がキャンバス上に十分見えているか */
 export function isDrawingOnScreen(img, canvas) {
   if (!img || !canvas) return false;

@@ -166,20 +166,7 @@ function buildZoneLabelText(name, metrics, opts = {}) {
   return name;
 }
 
-function fitZoneLabel(name, metrics, maxW, opts = {}) {
-  const text = buildZoneLabelText(name, metrics, opts);
-  for (let fs = 13; fs >= 7; fs--) {
-    const tb = new fabric.Textbox(text, {
-      width: maxW,
-      fontSize: fs,
-      fontWeight: "700",
-      lineHeight: 1.12,
-      splitByGrapheme: true,
-    });
-    if (tb.calcTextHeight() <= 100) return fs;
-  }
-  return 7;
-}
+const ZONE_LABEL_FONT_SIZE = 8;
 
 export function createZoneGroup(points, preset, memo = "", metrics = null) {
   const style = getZoneStyle(preset.color, preset.opacity);
@@ -200,7 +187,7 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
   const labelText = buildZoneLabelText(preset.name, metrics);
   const label = new fabric.Textbox(labelText, {
     width: labelW,
-    fontSize: fitZoneLabel(preset.name, metrics, labelW),
+    fontSize: ZONE_LABEL_FONT_SIZE,
     fill: "#0f172a",
     fontWeight: "700",
     textAlign: "center",
@@ -239,6 +226,148 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
   return group;
 }
 
+/** キャンバス座標の頂点配列で区画ポリゴンを更新 */
+export function setZoneCanvasPoints(zone, canvasPoints) {
+  if (!zone || canvasPoints.length < 3) return zone;
+  const poly = zone._objects?.[0];
+  if (!poly || poly.type !== "polygon") return zone;
+
+  const c = polygonCentroid(canvasPoints);
+  const localPoints = canvasPoints.map((p) => ({ x: p.x - c.x, y: p.y - c.y }));
+
+  zone.set({
+    left: c.x,
+    top: c.y,
+    angle: 0,
+    scaleX: 1,
+    scaleY: 1,
+    skewX: 0,
+    skewY: 0,
+  });
+  poly.set({ points: localPoints });
+  if (typeof poly._setPositionDimensions === "function") {
+    poly._setPositionDimensions({});
+  }
+  if (typeof zone.triggerLayout === "function") zone.triggerLayout();
+  zone.setCoords();
+  zone.dirty = true;
+  return zone;
+}
+
+/**
+ * 区画の角をドラッグして変形 — cleanup(restoreOriginal?) で終了
+ */
+export function enableZoneVertexEdit(canvas, zone, opts = {}) {
+  const { getSnapPtr, onPointsChange } = opts;
+  const stroke = zone.zoneColor || "#3b82f6";
+  let canvasPoints = getZoneCanvasPoints(zone).map((p) => ({ x: p.x, y: p.y }));
+  const originalPoints = canvasPoints.map((p) => ({ x: p.x, y: p.y }));
+  let handles = [];
+  let edges = [];
+
+  zone.set({ selectable: false, evented: false, opacity: 0.5, hasControls: false, hasBorders: false });
+
+  function snapPtr(raw, e) {
+    return getSnapPtr ? getSnapPtr(raw, e) : { x: raw.x, y: raw.y };
+  }
+
+  function syncEdges() {
+    edges.forEach((line, i) => {
+      const a = canvasPoints[i];
+      const b = canvasPoints[(i + 1) % canvasPoints.length];
+      line.set({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    });
+  }
+
+  function rebuildHandles() {
+    const r = 7 / Math.max(canvas.getZoom() || 1, 0.25);
+    handles.forEach((h) => canvas.remove(h));
+    handles = canvasPoints.map((pt, i) => {
+      const h = new fabric.Circle({
+        left: pt.x,
+        top: pt.y,
+        radius: r,
+        fill: "#fff",
+        stroke,
+        strokeWidth: 2,
+        originX: "center",
+        originY: "center",
+        hasControls: false,
+        hasBorders: false,
+        hoverCursor: "grab",
+        _zoneVertexEdit: true,
+        _vertexIndex: i,
+        _skipHistory: true,
+      });
+      canvas.add(h);
+      return h;
+    });
+    handles.forEach((h) => h.bringToFront());
+  }
+
+  function rebuildEdges() {
+    edges.forEach((l) => canvas.remove(l));
+    edges = [];
+    for (let i = 0; i < canvasPoints.length; i++) {
+      const a = canvasPoints[i];
+      const b = canvasPoints[(i + 1) % canvasPoints.length];
+      const line = new fabric.Line([a.x, a.y, b.x, b.y], {
+        stroke,
+        strokeWidth: 2,
+        strokeDashArray: [6, 4],
+        selectable: false,
+        evented: false,
+        _zoneVertexEdit: true,
+        _skipHistory: true,
+      });
+      edges.push(line);
+      canvas.add(line);
+    }
+    edges.forEach((l) => l.bringToFront());
+    handles.forEach((h) => h.bringToFront());
+  }
+
+  function applyPoints() {
+    setZoneCanvasPoints(zone, canvasPoints);
+    onPointsChange?.(canvasPoints);
+  }
+
+  function onObjectMoving(e) {
+    const h = e.target;
+    if (!h?._zoneVertexEdit) return;
+    const i = h._vertexIndex;
+    const ptr = snapPtr({ x: h.left, y: h.top }, e.e);
+    canvasPoints[i] = { x: ptr.x, y: ptr.y };
+    h.set({ left: ptr.x, top: ptr.y });
+    h.setCoords();
+    applyPoints();
+    syncEdges();
+    canvas.requestRenderAll();
+  }
+
+  rebuildHandles();
+  rebuildEdges();
+  applyPoints();
+  canvas.requestRenderAll();
+
+  canvas.on("object:moving", onObjectMoving);
+
+  return function cleanup(restoreOriginal = false) {
+    canvas.off("object:moving", onObjectMoving);
+    handles.forEach((h) => canvas.remove(h));
+    edges.forEach((l) => canvas.remove(l));
+    handles = [];
+    edges = [];
+    if (restoreOriginal) {
+      canvasPoints = originalPoints.map((p) => ({ x: p.x, y: p.y }));
+      setZoneCanvasPoints(zone, canvasPoints);
+      onPointsChange?.(canvasPoints);
+    }
+    zone.set({ opacity: 1 });
+    canvas.requestRenderAll();
+  };
+}
+
 export function updateZoneLabel(group, metrics = undefined) {
   const label = group._objects?.find((o) => o.type === "textbox");
   const poly = group._objects?.[0];
@@ -254,7 +383,7 @@ export function updateZoneLabel(group, metrics = undefined) {
   label.set({
     text: buildZoneLabelText(name, m, labelOpts),
     width: labelW,
-    fontSize: fitZoneLabel(name, m, labelW, labelOpts),
+    fontSize: ZONE_LABEL_FONT_SIZE,
   });
   group.dirty = true;
 }
@@ -584,8 +713,19 @@ const CALIB_STYLE = {
   guideStroke: "#f59e0b",
 };
 
+/** 採寸・区画の途中プレビューをすべて除去 */
+export function purgeCanvasPreviews(canvas) {
+  if (!canvas) return;
+  canvas
+    .getObjects()
+    .filter((o) => o._scalePreview || o._zonePreview)
+    .forEach((o) => canvas.remove(o));
+  canvas.requestRenderAll();
+}
+
 /** 初期測定用 — 角クリックで敷地全体を囲む（区画は作らない） */
-export function enableCalibPolygonDraw(canvas, onPointsDone) {
+export function enableCalibPolygonDraw(canvas, onPointsDone, opts = {}) {
+  const { isClickAllowed } = opts;
   const points = [];
   let previewLines = [];
   let vertexDots = [];
@@ -631,6 +771,18 @@ export function enableCalibPolygonDraw(canvas, onPointsDone) {
     const ptr = snapPoint(raw, canvas, e);
 
     if (e.type === "mousemove" && points.length) {
+      if (isClickAllowed && !isClickAllowed(ptr)) {
+        if (rubberLine) {
+          canvas.remove(rubberLine);
+          rubberLine = null;
+        }
+        if (previewPoly) {
+          canvas.remove(previewPoly);
+          previewPoly = null;
+        }
+        canvas.requestRenderAll();
+        return;
+      }
       if (rubberLine) canvas.remove(rubberLine);
       const last = points[points.length - 1];
       rubberLine = new fabric.Line([last.x, last.y, ptr.x, ptr.y], {
@@ -673,6 +825,8 @@ export function enableCalibPolygonDraw(canvas, onPointsDone) {
     }
 
     if (e.type === "mousedown" && e.button === 0) {
+      if (isClickAllowed && !isClickAllowed(ptr)) return;
+
       const now = Date.now();
       const isDouble = now - lastClickAt < 350;
       lastClickAt = now;

@@ -4,7 +4,6 @@ import {
   setCachedProjects,
   getCachedProjects,
   getProjectSheets,
-  addImportedProposal,
 } from "./projects.js";
 import {
   snapPoint,
@@ -22,6 +21,8 @@ import {
   updateZoneColors,
   upgradeZoneObject,
   removeOrphanZonePreviews,
+  purgeCanvasPreviews,
+  enableZoneVertexEdit,
   refreshZoneDisplay,
   ensureZoneDimensionMarkers,
 } from "./zones.js";
@@ -58,8 +59,16 @@ import {
   configureDrawingResize,
   isValidDrawingTransform,
   isDrawingOnScreen,
+  isPointInsideDrawing,
 } from "./drawing-transform.js";
-import { saveDesign, loadDesign } from "./storage.js";
+import {
+  saveDesign,
+  loadDesign,
+  designPageKey,
+  copySheetDesign,
+  sheetHasSavedDesign,
+  designHasContent,
+} from "./storage.js";
 import {
   loadCustomParts,
   addCustomPart,
@@ -84,7 +93,6 @@ import {
 const canvasWrap = document.getElementById("canvas-wrap");
 const statusEl = document.getElementById("status");
 const memoTooltip = document.getElementById("memo-tooltip");
-const zoneTooltip = document.getElementById("zone-tooltip");
 const drawDimHud = document.getElementById("draw-dim-hud");
 
 let canvas;
@@ -103,11 +111,8 @@ let spaceDown = false;
 let lastPan = null;
 let placeStart = null;
 let placePreview = null;
-let zoneTapStart = null;
 let memoPendingPos = null;
 let editingMemo = null;
-let editingZone = null;
-let zoneActionTarget = null;
 let editingCustomPresetId = null;
 let drawingImage = null;
 let drawingTransformBefore = null;
@@ -118,7 +123,7 @@ let scaleCalibCleanup = null;
 let scaleCalibPendingPoints = null;
 let scaleHudMinimized = false;
 let workBoundaryObject = null;
-let shapeDrawInProgress = null;
+let zoneVertexEditCleanup = null;
 let autoSaveTimer = null;
 let lastSavedAt = null;
 const history = [];
@@ -136,7 +141,7 @@ async function init() {
   rebuildSheetSelect();
   setupToolbar();
   setupModals();
-  setupProposalModal();
+  setupSheetCopyModal();
   setupPropsForm();
   setupDrawStyle();
   setupZoneUI();
@@ -157,17 +162,38 @@ function waitForLayout() {
   });
 }
 
+function collapseMultiSelection() {
+  if (!canvas) return false;
+  const active = canvas.getActiveObject();
+  if (!active || active.type !== "activeSelection") return false;
+  const objs = active.getObjects();
+  if (objs.length <= 1) return false;
+  const zones = objs.filter((o) => o.objectType === "zone");
+  const pick = zones.length ? zones[zones.length - 1] : objs[objs.length - 1];
+  canvas.discardActiveObject();
+  canvas.setActiveObject(pick);
+  canvas.requestRenderAll();
+  return true;
+}
+
 function initCanvas() {
   canvas = new fabric.Canvas("design-canvas", {
-    selection: true,
+    selection: false,
     preserveObjectStacking: true,
     backgroundColor: "#374151",
     fireRightClick: true,
     stopContextMenu: true,
   });
+  canvas.selection = false;
+  canvas.selectionKey = null;
+  canvas.altSelectionKey = null;
 
   canvas.on("object:modified", (e) => {
     if (isRestoringHistory) return;
+    if (e.target?.type === "activeSelection") {
+      collapseMultiSelection();
+      return;
+    }
     if (e.target?.objectType === "drawing") {
       onDrawingTransformEnd();
       return;
@@ -221,12 +247,24 @@ function initCanvas() {
     }
   });
   canvas.on("object:moving", (e) => {
+    if (e.target?.type === "activeSelection") {
+      collapseMultiSelection();
+      return;
+    }
     if (e.target?.objectType === "zone") {
       refreshZoneOnCanvas(e.target, computeZoneMetricsFor(e.target));
     }
     updatePropsLive();
   });
   canvas.on("selection:created", (e) => {
+    if (zoneVertexEditCleanup) {
+      canvas.discardActiveObject();
+      return;
+    }
+    if (collapseMultiSelection()) {
+      updateProps();
+      return;
+    }
     if (pendingPlacementZone && e.selected?.[0] !== pendingPlacementZone) {
       canvas.setActiveObject(pendingPlacementZone);
     }
@@ -234,6 +272,14 @@ function initCanvas() {
     updateProps();
   });
   canvas.on("selection:updated", (e) => {
+    if (zoneVertexEditCleanup) {
+      canvas.discardActiveObject();
+      return;
+    }
+    if (collapseMultiSelection()) {
+      updateProps();
+      return;
+    }
     if (pendingPlacementZone && e.selected?.[0] !== pendingPlacementZone) {
       canvas.setActiveObject(pendingPlacementZone);
     }
@@ -241,14 +287,20 @@ function initCanvas() {
     updateProps();
   });
   canvas.on("selection:cleared", () => {
+    if (zoneVertexEditCleanup) return;
     if (pendingPlacementZone) {
       canvas.setActiveObject(pendingPlacementZone);
       return;
     }
     updateProps();
   });
-  canvas.on("mouse:over", onObjectHover);
-  canvas.on("mouse:out", onObjectOut);
+
+  canvas.on("mouse:over", (opt) => {
+    if (opt.target?.objectType === "memo") showMemoTooltip(opt.e, opt.target.memoData);
+  });
+  canvas.on("mouse:out", (opt) => {
+    if (opt.target?.objectType === "memo") hideMemoTooltip();
+  });
 
   canvas.on("mouse:wheel", (opt) => {
     const e = opt.e;
@@ -276,6 +328,7 @@ function initCanvas() {
   canvas.on("mouse:down", onCanvasMouseDown);
   canvas.on("mouse:move", onCanvasMouseMove);
   canvas.on("mouse:up", onCanvasMouseUp);
+  canvas.on("mouse:dblclick", onCanvasDoubleClick);
 
   const blockContextMenu = (e) => {
     e.preventDefault();
@@ -470,6 +523,7 @@ async function loadDrawing(id) {
     if (saved?.workBoundaryCanvasPoints?.length) {
       applyWorkBoundary(saved.workBoundaryCanvasPoints);
     }
+    purgeCanvasPreviews(canvas);
     isRestoringHistory = false;
     applyMachinesVisibility();
     refreshZoneHooksList();
@@ -594,8 +648,7 @@ function shouldStartPan(opt) {
   if (spaceDown && e.button === 0) return true;
   if (activeTool === "select" && e.button === 0) {
     const t = opt.target;
-    if (!t) return true;
-    if (t.objectType === "drawing") return false;
+    if (!t || t.objectType === "drawing") return true;
   }
   return false;
 }
@@ -681,8 +734,6 @@ function setupDrawStyle() {
 
 function setupZoneUI() {
   buildZoneHooks();
-  setupZoneModal();
-  setupZoneActionModal();
   setupCustomPresetModal();
   setupScaleUI();
 
@@ -702,6 +753,9 @@ function setupZoneUI() {
     pushHistory();
     refreshZoneHooksList();
   });
+
+  setupZoneSidebarResize();
+  setupZoneSidebarToggle();
 }
 
 function refreshZoneOnCanvas(zone, metrics) {
@@ -714,86 +768,114 @@ function showPlacementHud(show) {
   canvasWrap?.classList.toggle("placing-zone", !!show);
 }
 
-function enterZonePlacementMode(zone) {
+function enterZoneVertexEditMode(zone, isNew = true) {
   if (!zone) return;
   if (pendingPlacementZone && pendingPlacementZone !== zone) {
-    confirmZonePlacement();
+    confirmZoneVertexEdit();
   }
+  pauseZonePolygonDraw();
   pendingPlacementZone = zone;
-  zone._zonePendingFix = true;
-  zone._skipHistory = true;
-  zone.set({
-    hasControls: true,
-    hasBorders: true,
-    lockScaling: true,
-    lockRotation: true,
-    lockScalingX: true,
-    lockScalingY: true,
-    lockSkewingX: true,
-    lockSkewingY: true,
-    borderColor: "#f59e0b",
-    borderDashArray: [8, 4],
-    cornerColor: "#f59e0b",
-    cornerStrokeColor: "#fff",
-    hoverCursor: "move",
+  if (isNew) {
+    zone._zonePendingFix = true;
+    zone._skipHistory = true;
+  }
+
+  zoneVertexEditCleanup = enableZoneVertexEdit(canvas, zone, {
+    getSnapPtr: (raw, e) => snapPoint(raw, canvas, e),
+    onPointsChange: () => {
+      ensureZoneDimensionMarkers(zone);
+      refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+    },
   });
-  applyInteractiveControls(zone);
-  ensureDrawingScale();
-  ensureZoneDimensionMarkers(zone);
-  refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+
   activeTool = "select";
   document.querySelectorAll("[data-tool]").forEach((b) => {
     b.classList.toggle("active", b.dataset.tool === "select");
   });
   canvas.isDrawingMode = false;
-  canvas.selection = true;
-  canvas.skipTargetFind = false;
-  canvas.setActiveObject(zone);
+  canvas.selection = false;
+  canvas.skipTargetFind = true;
+  canvas.discardActiveObject();
   showPlacementHud(true);
   hideDrawDimHud();
   updateCanvasCursor();
   updateDrawingInteractivity();
   updateProps();
   canvas.requestRenderAll();
-  flashStatus("Enter で固定");
+  flashStatus("角をドラッグで変形 · Enter で確定");
 }
 
-function confirmZonePlacement() {
+function confirmZoneVertexEdit() {
   const zone = pendingPlacementZone;
   if (!zone) return;
+  if (zoneVertexEditCleanup) {
+    zoneVertexEditCleanup(false);
+    zoneVertexEditCleanup = null;
+  }
+  const isNew = !!zone._zonePendingFix;
+  delete zone._zonePendingFix;
+  delete zone._skipHistory;
+  pendingPlacementZone = null;
+  zone.set({ selectable: true, evented: true, opacity: 1 });
+  applyInteractiveControls(zone);
+  showPlacementHud(false);
+  ensureZoneDimensionMarkers(zone);
+  refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+  canvas.requestRenderAll();
+  if (isNew) {
+    finalizeNewZone(zone);
+  } else {
+    pushHistory();
+    persistCurrent();
+    scheduleAutoSave();
+    refreshZoneHooksList();
+    flashStatus(`「${zone.zoneName || "区画"}」を更新しました`);
+  }
+  updateProps();
+  resumeZonePolygonDraw();
+}
+
+function cancelZoneVertexEdit() {
+  const zone = pendingPlacementZone;
+  if (!zone) return;
+  const isNew = !!zone._zonePendingFix;
+  if (zoneVertexEditCleanup) {
+    zoneVertexEditCleanup(!isNew);
+    zoneVertexEditCleanup = null;
+  }
   pendingPlacementZone = null;
   delete zone._zonePendingFix;
   delete zone._skipHistory;
-  zone.set({
-    borderColor: "#60a5fa",
-    borderDashArray: null,
-    cornerColor: "#ffffff",
-    cornerStrokeColor: "#3b82f6",
-    lockScaling: false,
-    lockRotation: false,
-    lockScalingX: false,
-    lockScalingY: false,
-    lockSkewingX: false,
-    lockSkewingY: false,
-  });
-  applyInteractiveControls(zone);
   showPlacementHud(false);
-  finalizeNewZone(zone);
+  hideDrawDimHud();
+  if (isNew) {
+    canvas.remove(zone);
+    canvas.discardActiveObject();
+    refreshZoneHooksList();
+    flashStatus("取消");
+  } else {
+    zone.set({ selectable: true, evented: true, opacity: 1 });
+    applyInteractiveControls(zone);
+    ensureZoneDimensionMarkers(zone);
+    refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+    canvas.requestRenderAll();
+    flashStatus("変更を取り消しました");
+  }
   updateProps();
+  resumeZonePolygonDraw();
+}
+
+/** @deprecated alias */
+function enterZonePlacementMode(zone) {
+  enterZoneVertexEditMode(zone, true);
+}
+
+function confirmZonePlacement() {
+  confirmZoneVertexEdit();
 }
 
 function cancelZonePlacement() {
-  const zone = pendingPlacementZone;
-  if (!zone) return;
-  pendingPlacementZone = null;
-  showPlacementHud(false);
-  hideDrawDimHud();
-  canvas.remove(zone);
-  canvas.discardActiveObject();
-  refreshZoneHooksList();
-  updateProps();
-  canvas.requestRenderAll();
-  flashStatus("取消");
+  cancelZoneVertexEdit();
 }
 
 function discardPendingPlacementIfNeeded(actionLabel) {
@@ -874,11 +956,7 @@ function ensureDrawingScale() {
 }
 
 function removeScalePreviews() {
-  canvas
-    ?.getObjects()
-    .filter((o) => o._scalePreview)
-    .forEach((o) => canvas.remove(o));
-  canvas?.requestRenderAll();
+  purgeCanvasPreviews(canvas);
 }
 
 function fillScaleTsuboFromSheet() {
@@ -895,6 +973,8 @@ function renderWorkBoundaryOverlay() {
   }
   const pts = getWorkBoundaryPoints();
   if (!pts?.length || !canvas) return;
+  // 採寸確定後は枠線を表示しない（描画制限だけ維持）
+  if (scaleCalibrated && !scaleCalibCleanup && !scaleCalibPendingPoints) return;
   workBoundaryObject = new fabric.Polygon(
     pts.map((p) => ({ x: p.x, y: p.y })),
     {
@@ -1017,7 +1097,7 @@ function updateScaleUI() {
   }
 }
 
-function cancelScaleCalibration() {
+function cancelScaleCalibration(resumeZone = true) {
   if (scaleCalibCleanup) {
     scaleCalibCleanup();
     scaleCalibCleanup = null;
@@ -1025,6 +1105,44 @@ function cancelScaleCalibration() {
   scaleCalibPendingPoints = null;
   removeScalePreviews();
   setScaleCalibMode("idle");
+  if (resumeZone) resumeZonePolygonDraw();
+}
+
+function pauseZonePolygonDraw() {
+  if (polygonCleanup) {
+    polygonCleanup();
+    polygonCleanup = null;
+  }
+  purgeCanvasPreviews(canvas);
+  hideDrawDimHud();
+}
+
+function attachZonePolygonDraw() {
+  if (!canvas || scaleCalibCleanup || scaleCalibPendingPoints) return;
+  if (polygonCleanup) return;
+  canvas.discardActiveObject();
+  ensureDrawingScale();
+  canvas.selection = false;
+  canvas.skipTargetFind = true;
+  polygonCleanup = enableZoneDraw(
+    canvas,
+    () => pendingZonePreset,
+    (zone) => {
+      polygonCleanup = null;
+      if (!zone) {
+        setTool("select");
+        return;
+      }
+      enterZoneVertexEditMode(zone, true);
+    },
+    (points) => computeZoneMetricsFromCanvasPoints(points, drawingImage, currentMmPerImagePx),
+    (a, b) => segmentMetrics(a, b, drawingImage, currentMmPerImagePx),
+    (metrics) => showDrawDimHud(metrics)
+  );
+}
+
+function resumeZonePolygonDraw() {
+  if (activeTool === "zone") attachZonePolygonDraw();
 }
 
 function applyScaleFromPolygon(tsubo) {
@@ -1061,12 +1179,14 @@ function applyScaleFromPolygon(tsubo) {
     knownM2,
     knownTsubo: tsubo,
   };
-  cancelScaleCalibration();
+  cancelScaleCalibration(false);
   applyWorkBoundary(boundaryPts);
   scaleHudMinimized = true;
   refreshAllZoneMetrics();
   updateScaleUI();
   refreshZoneHooksList();
+  purgeCanvasPreviews(canvas);
+  resumeZonePolygonDraw();
   pushHistory();
   scheduleAutoSave();
   flashStatus(`測定完了 ${tsubo}坪`);
@@ -1110,29 +1230,131 @@ function setupScaleUI() {
 
 function startCalibPolygonDraw() {
   expandScaleHud();
-  applyWorkBoundary(null);
-  cancelScaleCalibration();
-  if (polygonCleanup) {
-    polygonCleanup();
-    polygonCleanup = null;
+  pauseZonePolygonDraw();
+  if (scaleCalibrated) {
+    scaleCalibrated = false;
+    scaleCalibSummary = null;
+    currentMmPerImagePx = null;
+    refreshAllZoneMetrics();
+    updateScaleUI();
   }
+  applyWorkBoundary(null);
+  cancelScaleCalibration(false);
   removeOrphanZonePreviews(canvas);
+  purgeCanvasPreviews(canvas);
 
   setScaleCalibMode("drawing");
 
-  scaleCalibCleanup = enableCalibPolygonDraw(canvas, (points) => {
-    scaleCalibCleanup = null;
-    if (!points?.length) {
-      cancelScaleCalibration();
-      return;
+  scaleCalibCleanup = enableCalibPolygonDraw(
+    canvas,
+    (points) => {
+      scaleCalibCleanup = null;
+      if (!points?.length) {
+        cancelScaleCalibration();
+        return;
+      }
+      scaleCalibPendingPoints = points;
+      purgeCanvasPreviews(canvas);
+      setScaleCalibMode("ready");
+      document.getElementById("scale-known-tsubo")?.focus();
+    },
+    {
+      isClickAllowed: (ptr) => {
+        if (isPointInsideDrawing(ptr, drawingImage)) return true;
+        flashStatus("図面の上をクリックしてください");
+        return false;
+      },
     }
-    scaleCalibPendingPoints = points;
-    setScaleCalibMode("ready");
-    document.getElementById("scale-known-tsubo")?.focus();
-  });
+  );
 }
 
 const HOOK_STATE_KEY = "renewal-zone-hook-collapsed";
+const ZONE_SIDEBAR_WIDTH_KEY = "renewal-zone-sidebar-width";
+const ZONE_SIDEBAR_HIDDEN_KEY = "renewal-zone-sidebar-hidden";
+const ZONE_SIDEBAR_MIN = 160;
+const ZONE_SIDEBAR_MAX = 480;
+const ZONE_SIDEBAR_DEFAULT = 220;
+
+function applyZoneSidebarWidth(px) {
+  const w = Math.min(ZONE_SIDEBAR_MAX, Math.max(ZONE_SIDEBAR_MIN, px));
+  document.documentElement.style.setProperty("--zone-sidebar-width", `${w}px`);
+}
+
+function setZoneSidebarHidden(hidden) {
+  document.getElementById("zone-sidebar")?.classList.toggle("is-hidden", hidden);
+  document.getElementById("workspace")?.classList.toggle("zone-sidebar-hidden", hidden);
+  const fab = document.getElementById("zone-sidebar-fab");
+  if (fab) fab.hidden = !hidden;
+}
+
+function setupZoneSidebarResize() {
+  const resizer = document.getElementById("zone-sidebar-resizer");
+  const sidebar = document.getElementById("zone-sidebar");
+  if (!resizer || !sidebar) return;
+
+  const saved = parseInt(localStorage.getItem(ZONE_SIDEBAR_WIDTH_KEY), 10);
+  if (saved >= ZONE_SIDEBAR_MIN && saved <= ZONE_SIDEBAR_MAX) {
+    applyZoneSidebarWidth(saved);
+  } else {
+    applyZoneSidebarWidth(ZONE_SIDEBAR_DEFAULT);
+  }
+
+  let dragging = false;
+  let startX = 0;
+  let startW = 0;
+
+  resizer.addEventListener("mousedown", (e) => {
+    if (sidebar.classList.contains("is-hidden")) return;
+    e.preventDefault();
+    dragging = true;
+    startX = e.clientX;
+    startW = sidebar.getBoundingClientRect().width;
+    resizer.classList.add("is-dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  });
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    applyZoneSidebarWidth(startW + (e.clientX - startX));
+  };
+
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove("is-dragging");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    const w = parseInt(
+      getComputedStyle(document.documentElement).getPropertyValue("--zone-sidebar-width"),
+      10
+    );
+    if (Number.isFinite(w)) localStorage.setItem(ZONE_SIDEBAR_WIDTH_KEY, String(w));
+    resizeCanvas();
+  };
+
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onUp);
+}
+
+function setupZoneSidebarToggle() {
+  const closeBtn = document.getElementById("btn-zone-sidebar-close");
+  const fab = document.getElementById("zone-sidebar-fab");
+  const hidden = localStorage.getItem(ZONE_SIDEBAR_HIDDEN_KEY) === "true";
+  setZoneSidebarHidden(hidden);
+
+  closeBtn?.addEventListener("click", () => {
+    setZoneSidebarHidden(true);
+    localStorage.setItem(ZONE_SIDEBAR_HIDDEN_KEY, "true");
+    resizeCanvas();
+  });
+
+  fab?.addEventListener("click", () => {
+    setZoneSidebarHidden(false);
+    localStorage.setItem(ZONE_SIDEBAR_HIDDEN_KEY, "false");
+    resizeCanvas();
+  });
+}
 
 function loadHookCollapsedState() {
   try {
@@ -1208,6 +1430,7 @@ function createZoneHookElement(preset, collapsed, isCustom) {
       <button type="button" class="btn-zone-draw">描く</button>
       <button type="button" class="btn-zone-open" aria-expanded="${!collapsed[preset.id]}">${openLabel}</button>
     </div>
+    <p class="zone-hook-empty-hint">まだ作ったことがないですよ</p>
     <ul class="zone-hook-list" data-list-for="${preset.id}"></ul>
   `;
 
@@ -1220,6 +1443,9 @@ function createZoneHookElement(preset, collapsed, isCustom) {
 
   openBtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    const count =
+      parseInt(hook.querySelector(`[data-count-for="${preset.id}"]`)?.textContent || "0", 10) || 0;
+    if (count === 0) return;
     const isCollapsed = hook.classList.toggle("collapsed");
     openBtn.setAttribute("aria-expanded", String(!isCollapsed));
     openBtn.textContent = isCollapsed ? "開く" : "閉じる";
@@ -1233,6 +1459,8 @@ function createZoneHookElement(preset, collapsed, isCustom) {
     e.stopPropagation();
     hook.classList.remove("collapsed");
     openBtn.setAttribute("aria-expanded", "true");
+    openBtn.disabled = false;
+    openBtn.classList.remove("is-empty");
     openBtn.textContent = "閉じる";
     const state = loadHookCollapsedState();
     state[preset.id] = false;
@@ -1314,14 +1542,51 @@ function openCustomPresetModal(preset) {
   document.getElementById("custom-preset-modal").showModal();
 }
 
+function updateHookOpenState(hook, count) {
+  const openBtn = hook.querySelector(".btn-zone-open");
+  if (!openBtn) return;
+  const isCollapsed = hook.classList.contains("collapsed");
+
+  hook.classList.toggle("has-zones", count > 0);
+
+  if (count === 0) {
+    if (isCollapsed) {
+      openBtn.disabled = true;
+      openBtn.classList.add("is-empty");
+      openBtn.textContent = "";
+      openBtn.setAttribute("aria-expanded", "false");
+    } else {
+      openBtn.disabled = false;
+      openBtn.classList.remove("is-empty");
+      openBtn.textContent = "閉じる";
+      openBtn.setAttribute("aria-expanded", "true");
+    }
+    return;
+  }
+
+  openBtn.disabled = false;
+  openBtn.classList.remove("is-empty");
+  openBtn.textContent = isCollapsed ? "開く" : "閉じる";
+  openBtn.setAttribute("aria-expanded", String(!isCollapsed));
+}
+
 function setAllHooksCollapsed(collapsed) {
   const state = {};
   document.querySelectorAll(".zone-hook").forEach((hook) => {
+    const presetId = hook.dataset.presetId;
+    const count =
+      parseInt(document.querySelector(`[data-count-for="${presetId}"]`)?.textContent || "0", 10) || 0;
+
+    if (!collapsed && count === 0) {
+      hook.classList.add("collapsed");
+      state[presetId] = true;
+      updateHookOpenState(hook, count);
+      return;
+    }
+
     hook.classList.toggle("collapsed", collapsed);
-    const openBtn = hook.querySelector(".btn-zone-open");
-    openBtn?.setAttribute("aria-expanded", String(!collapsed));
-    if (openBtn) openBtn.textContent = collapsed ? "開く" : "閉じる";
-    state[hook.dataset.presetId] = collapsed;
+    state[presetId] = collapsed;
+    updateHookOpenState(hook, count);
   });
   saveHookCollapsedState(state);
 }
@@ -1370,8 +1635,12 @@ function refreshZoneHooksList() {
   });
 
   allPresets.forEach((preset) => {
+    const count = counts[preset.id] || 0;
     const countEl = document.querySelector(`[data-count-for="${preset.id}"]`);
-    if (countEl) countEl.textContent = String(counts[preset.id] || 0);
+    if (countEl) countEl.textContent = String(count);
+
+    const hook = document.querySelector(`.zone-hook[data-preset-id="${preset.id}"]`);
+    if (hook) updateHookOpenState(hook, count);
 
     const list = document.querySelector(`[data-list-for="${preset.id}"]`);
     if (!list) return;
@@ -1433,78 +1702,13 @@ function updateZoneActiveLabel() {
   el.textContent = name.replace(/エリア$/, "") || name;
 }
 
-function setupZoneModal() {
-  document.getElementById("zone-form")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const name = document.getElementById("zone-name").value.trim();
-    const memo = document.getElementById("zone-memo").value.trim();
-    if (!name) {
-      flashStatus("エリア名を入力してください");
-      return;
-    }
-
-    if (editingZone) {
-      editingZone.set({ zoneName: name, zoneMemo: memo });
-      refreshZoneOnCanvas(editingZone, computeZoneMetricsFor(editingZone));
-      canvas.requestRenderAll();
-    }
-    document.getElementById("zone-modal").close();
-    editingZone = null;
-    pushHistory();
-    persistCurrent();
-    scheduleAutoSave();
-    refreshZoneHooksList();
-  });
-
-  document.getElementById("zone-delete")?.addEventListener("click", () => {
-    if (editingZone) deleteZone(editingZone);
-  });
-}
-
-function setupZoneActionModal() {
-  document.getElementById("zone-action-edit")?.addEventListener("click", () => {
-    if (!zoneActionTarget) return;
-    document.getElementById("zone-action-modal").close();
-    openZoneModal(zoneActionTarget);
-  });
-
-  document.getElementById("zone-action-delete")?.addEventListener("click", () => {
-    if (zoneActionTarget) deleteZone(zoneActionTarget);
-  });
-
-  document.getElementById("zone-action-modal")?.addEventListener("close", () => {
-    zoneActionTarget = null;
-  });
-}
-
-function openZoneAction(zone) {
-  if (!zone) return;
-  zoneActionTarget = zone;
-  editingZone = null;
-  document.getElementById("zone-action-title").textContent = zone.zoneName || "区画";
-  const memoEl = document.getElementById("zone-action-memo");
-  const memo = zone.zoneMemo?.trim();
-  if (memo) {
-    memoEl.textContent = memo;
-    memoEl.classList.remove("empty");
-  } else {
-    memoEl.textContent = "メモはまだありません";
-    memoEl.classList.add("empty");
-  }
-  document.getElementById("zone-action-modal").showModal();
-}
-
 function deleteZone(zone) {
   if (!zone) return;
   const name = zone.zoneName || "区画";
   if (!confirm(`「${name}」を削除しますか？`)) return;
 
   canvas.remove(zone);
-  if (editingZone === zone) editingZone = null;
-  if (zoneActionTarget === zone) zoneActionTarget = null;
   canvas.discardActiveObject();
-  document.getElementById("zone-action-modal")?.close();
-  document.getElementById("zone-modal")?.close();
   pushHistory();
   refreshZoneHooksList();
   scheduleAutoSave();
@@ -1512,49 +1716,191 @@ function deleteZone(zone) {
   flashStatus(`「${name}」を削除しました`);
 }
 
-function openZoneModal(zone) {
-  editingZone = zone;
-  document.getElementById("zone-name").value = zone.zoneName || "";
-  document.getElementById("zone-memo").value = zone.zoneMemo || "";
-  document.getElementById("zone-delete").hidden = !zone;
-  document.getElementById("zone-modal").showModal();
+function populateCopyProjectSelect(sel) {
+  if (!sel) return;
+  sel.innerHTML = "";
+  getCachedProjects().forEach((p) => {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    const tag = p.type === "master" ? "" : p.author ? ` (${p.author})` : " (案)";
+    opt.textContent = p.name + tag;
+    sel.appendChild(opt);
+  });
 }
 
-function setupProposalModal() {
-  document.getElementById("btn-import-proposal")?.addEventListener("click", () => {
-    document.getElementById("proposal-form").reset();
-    document.getElementById("proposal-modal").showModal();
+function populateCopySheetSelect(projectId, sel, excludeSheetId) {
+  if (!sel) return;
+  sel.innerHTML = "";
+  getProjectSheets(projectId).forEach((s) => {
+    if (excludeSheetId && s.id === excludeSheetId) return;
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  });
+}
+
+function getSheetLabel(projectId, sheetId) {
+  const sheet = getProjectSheets(projectId).find((s) => s.id === sheetId);
+  return sheet?.name || sheetId;
+}
+
+function openSheetCopyModal() {
+  const modal = document.getElementById("sheet-copy-modal");
+  if (!modal) return;
+
+  const fromProject = document.getElementById("copy-from-project");
+  const fromSheet = document.getElementById("copy-from-sheet");
+  const toProject = document.getElementById("copy-to-project");
+  const toSheet = document.getElementById("copy-to-sheet");
+
+  populateCopyProjectSelect(fromProject);
+  populateCopyProjectSelect(toProject);
+  fromProject.value = currentProjectId;
+  toProject.value = currentProjectId;
+
+  populateCopySheetSelect(fromProject.value, fromSheet);
+  const excludeDest = fromProject.value === toProject.value ? fromSheet.value : null;
+  populateCopySheetSelect(toProject.value, toSheet, excludeDest);
+  if (currentDrawingId) fromSheet.value = currentDrawingId;
+  if (excludeDest && fromSheet.value === excludeDest) {
+    populateCopySheetSelect(toProject.value, toSheet, fromSheet.value);
+  }
+  if (!toSheet.value && toSheet.options.length) {
+    toSheet.value = toSheet.options[0].value;
+  }
+
+  modal.showModal();
+}
+
+function setupSheetCopyModal() {
+  document.getElementById("btn-sheet-copy")?.addEventListener("click", () => {
+    openSheetCopyModal();
   });
 
-  document.getElementById("proposal-form")?.addEventListener("submit", async (e) => {
+  const fromProject = document.getElementById("copy-from-project");
+  const toProject = document.getElementById("copy-to-project");
+  const fromSheet = document.getElementById("copy-from-sheet");
+  const toSheet = document.getElementById("copy-to-sheet");
+
+  fromProject?.addEventListener("change", () => {
+    populateCopySheetSelect(fromProject.value, fromSheet);
+    const exclude =
+      fromProject.value === toProject.value ? fromSheet.value : null;
+    populateCopySheetSelect(toProject.value, toSheet, exclude);
+    if (!toSheet.value && toSheet.options.length) toSheet.value = toSheet.options[0].value;
+  });
+  toProject?.addEventListener("change", () => {
+    const exclude =
+      fromProject.value === toProject.value ? fromSheet.value : null;
+    populateCopySheetSelect(toProject.value, toSheet, exclude);
+  });
+  fromSheet?.addEventListener("change", () => {
+    if (fromProject.value === toProject.value) {
+      populateCopySheetSelect(toProject.value, toSheet, fromSheet.value);
+      if (!toSheet.value && toSheet.options.length) toSheet.value = toSheet.options[0].value;
+    }
+  });
+
+  document.getElementById("sheet-copy-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const name = document.getElementById("proposal-name").value.trim();
-    const author = document.getElementById("proposal-author").value.trim();
-    const file = document.getElementById("proposal-image").files?.[0];
-    if (!name || !file) return;
+    const srcProjectId = fromProject.value;
+    const srcSheetId = fromSheet.value;
+    const destProjectId = toProject.value;
+    const destSheetId = toSheet.value;
 
-    const fileRef = await readFileAsDataURL(file);
+    if (!srcProjectId || !srcSheetId || !destProjectId || !destSheetId) return;
+    if (srcProjectId === destProjectId && srcSheetId === destSheetId) {
+      flashStatus("コピー元とコピー先が同じです");
+      return;
+    }
 
-    const entry = addImportedProposal({
-      name,
-      author,
-      sheets: [
-        {
-          id: "sheet-1",
-          name: name,
-          file: fileRef,
-          kind: file.type === "application/pdf" ? "pdf" : "image",
-        },
-      ],
-    });
+    if (
+      srcProjectId === currentProjectId &&
+      srcSheetId === currentDrawingId
+    ) {
+      persistCurrent();
+    }
 
-    document.getElementById("proposal-modal").close();
-    const projects = await refreshProjects();
-    setCachedProjects(projects);
-    populateProjectSelect(projects);
-    document.getElementById("project-select").value = entry.id;
-    await switchProject(entry.id);
-    flashStatus(`「${name}」を取り込みました`);
+    const srcLabel = getSheetLabel(srcProjectId, srcSheetId);
+    const destLabel = getSheetLabel(destProjectId, destSheetId);
+
+    if (!sheetHasSavedDesign(srcProjectId, srcSheetId)) {
+      const currentPageData =
+        srcProjectId === currentProjectId && srcSheetId === currentDrawingId
+          ? {
+              objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
+              scaleCalibrated,
+              mmPerImagePx: currentMmPerImagePx,
+              workBoundaryCanvasPoints: getWorkBoundaryPoints(),
+            }
+          : null;
+      if (!designHasContent(currentPageData)) {
+        flashStatus(`「${srcLabel}」にコピーできるデータがありません`);
+        return;
+      }
+      saveDesign(
+        designPageKey(srcProjectId, srcSheetId, currentPage),
+        JSON.parse(
+          JSON.stringify({
+            objects: currentPageData.objects,
+            viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
+            mmPerImagePx: currentPageData.mmPerImagePx,
+            scaleCalibrated: currentPageData.scaleCalibrated,
+            scaleCalibSummary,
+            scaleHudMinimized,
+            workBoundaryCanvasPoints: currentPageData.workBoundaryCanvasPoints,
+            drawingTransform: drawingImage
+              ? {
+                  left: drawingImage.left,
+                  top: drawingImage.top,
+                  scaleX: drawingImage.scaleX,
+                  scaleY: drawingImage.scaleY,
+                }
+              : null,
+          })
+        )
+      );
+    }
+
+    if (sheetHasSavedDesign(destProjectId, destSheetId)) {
+      const ok = confirm(
+        `「${destLabel}」には既にデータがあります。上書きしてコピーしますか？`
+      );
+      if (!ok) return;
+    }
+
+    const { copied, pages } = copySheetDesign(
+      srcProjectId,
+      srcSheetId,
+      destProjectId,
+      destSheetId
+    );
+    if (!copied) {
+      flashStatus(`「${srcLabel}」にコピーできるデータがありません`);
+      return;
+    }
+
+    document.getElementById("sheet-copy-modal").close();
+
+    const pageNote = pages.length > 1 ? `（${pages.length}ページ）` : "";
+    flashStatus(`「${srcLabel}」→「${destLabel}」へコピーしました${pageNote}`);
+
+    if (destProjectId === currentProjectId && destSheetId === currentDrawingId) {
+      await loadDrawing(destSheetId);
+    } else if (
+      destProjectId !== currentProjectId ||
+      destSheetId !== currentDrawingId
+    ) {
+      const go = confirm(`コピー先の「${destLabel}」を開きますか？`);
+      if (go) {
+        if (destProjectId !== currentProjectId) {
+          document.getElementById("project-select").value = destProjectId;
+          await switchProject(destProjectId);
+        }
+        await switchDrawing(destSheetId);
+      }
+    }
   });
 }
 
@@ -1768,7 +2114,8 @@ function cancelZoneDrawing() {
     polygonCleanup();
     polygonCleanup = null;
   }
-  removeOrphanZonePreviews(canvas);
+  purgeCanvasPreviews(canvas);
+  hideDrawDimHud();
   setTool("select");
 }
 
@@ -1814,19 +2161,6 @@ function handleCanvasRightClick(opt) {
     return;
   }
 
-  if (activeTool === "line") {
-    cancelShapeDrawInProgress();
-    disableShapeDraw();
-    setTool("select");
-    return;
-  }
-
-  if (activeTool === "pen") {
-    canvas.isDrawingMode = false;
-    setTool("select");
-    return;
-  }
-
   if (deleteObjectOnRightClick(opt.target)) return;
 
   const active = canvas.getActiveObject();
@@ -1843,10 +2177,11 @@ function onCanvasMouseDown(opt) {
 
   if (scaleCalibCleanup) return;
 
-  if (activeTool === "line" || activeTool === "pen" || activeTool === "zone") return;
+  if (activeTool === "zone") return;
 
   if (e.button === 0 && activeTool === "select" && opt.target?.objectType === "zone") {
-    zoneTapStart = { x: e.clientX, y: e.clientY, target: opt.target };
+    collapseMultiSelection();
+    canvas.setActiveObject(opt.target);
     return;
   }
 
@@ -1908,23 +2243,25 @@ function onCanvasMouseMove(opt) {
   }
 }
 
+function onCanvasDoubleClick(opt) {
+  if (scaleCalibCleanup || scaleCalibPendingPoints || pendingPlacementZone) return;
+  const target = opt.target;
+  let zone = null;
+  if (target?.objectType === "zone") zone = target;
+  else if (target?.group?.objectType === "zone") zone = target.group;
+  if (!zone || zone._zonePendingFix) return;
+  opt.e?.preventDefault?.();
+  opt.e?.stopPropagation?.();
+  enterZoneVertexEditMode(zone, false);
+}
+
 async function onCanvasMouseUp(opt) {
   if (scaleCalibCleanup) return;
-
-  if (zoneTapStart && activeTool === "select") {
-    const e = opt.e;
-    const moved = Math.hypot(e.clientX - zoneTapStart.x, e.clientY - zoneTapStart.y);
-    if (moved < 6 && opt.target?.objectType === "zone") {
-      canvas.setActiveObject(opt.target);
-      openZoneAction(opt.target);
-    }
-    zoneTapStart = null;
-  }
 
   if (isPanning) {
     isPanning = false;
     lastPan = null;
-    canvas.selection = activeTool === "select";
+    canvas.selection = false;
     updateCanvasCursor();
     return;
   }
@@ -1991,42 +2328,6 @@ async function addPartToCanvas(def, x, y, w, h) {
 }
 
 // ── Memo tooltip ────────────────────────────────────
-function onObjectHover(opt) {
-  const obj = opt.target;
-  if (obj?.objectType === "memo") {
-    showMemoTooltip(opt.e, obj.memoData);
-    return;
-  }
-  if (obj?.objectType === "zone") {
-    showZoneTooltip(opt.e, obj);
-    return;
-  }
-}
-
-function onObjectOut(opt) {
-  if (opt.target?.objectType === "memo") hideMemoTooltip();
-  if (opt.target?.objectType === "zone") hideZoneTooltip();
-}
-
-function showZoneTooltip(e, zone) {
-  const memo = zone.zoneMemo?.trim();
-  const sizeLine = formatZoneSizeText(zone._zoneMetrics);
-  const sizeHtml = sizeLine
-    ? `<span class="zone-tip-size">${esc(sizeLine.replace("\n", " / "))}</span>`
-    : "";
-  zoneTooltip.innerHTML = memo
-    ? `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}${esc(memo)}`
-    : `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}`;
-  zoneTooltip.hidden = false;
-  const wrap = canvasWrap.getBoundingClientRect();
-  zoneTooltip.style.left = `${e.clientX - wrap.left + 12}px`;
-  zoneTooltip.style.top = `${e.clientY - wrap.top + 12}px`;
-}
-
-function hideZoneTooltip() {
-  zoneTooltip.hidden = true;
-}
-
 function showMemoTooltip(e, data) {
   if (!data) return;
   const lines = [
@@ -2176,48 +2477,35 @@ function setupToolbar() {
   });
 }
 
+function detachZonePolygonDraw() {
+  if (polygonCleanup) {
+    polygonCleanup();
+    polygonCleanup = null;
+  }
+  hideDrawDimHud();
+}
+
 function setTool(tool) {
   if (pendingPlacementZone && tool !== "select") return;
   activeTool = tool;
-  disableShapeDraw();
+  if (tool !== "zone") detachZonePolygonDraw();
+  if (tool === "zone" || tool === "pan") {
+    canvas.discardActiveObject();
+  }
   document.querySelectorAll("[data-tool]").forEach((b) => {
     b.classList.toggle("active", b.dataset.tool === tool);
   });
 
-  canvas.isDrawingMode = tool === "pen";
-  canvas.selection = tool === "select";
+  canvas.isDrawingMode = false;
+  canvas.selection = false;
 
-  if (tool === "pen") {
-    canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
-    canvas.freeDrawingBrush.color = "#ef4444";
-    canvas.freeDrawingBrush.width = 2;
-  }
-
-  if (tool === "line") {
-    canvas.selection = false;
-    canvas.skipTargetFind = true;
-    enableShapeDraw(tool);
-  } else if (tool === "zone") {
-    ensureDrawingScale();
-    canvas.selection = false;
-    canvas.skipTargetFind = true;
-    polygonCleanup = enableZoneDraw(
-      canvas,
-      () => pendingZonePreset,
-      (zone) => {
-        polygonCleanup = null;
-        if (!zone) {
-          setTool("select");
-          return;
-        }
-        enterZonePlacementMode(zone);
-      },
-      (points) => computeZoneMetricsFromCanvasPoints(points, drawingImage, currentMmPerImagePx),
-      (a, b) => segmentMetrics(a, b, drawingImage, currentMmPerImagePx),
-      (metrics) => showDrawDimHud(metrics)
-    );
+  if (tool === "zone") {
+    if (scaleCalibCleanup || scaleCalibPendingPoints) {
+      canvas.skipTargetFind = true;
+    } else {
+      attachZonePolygonDraw();
+    }
   } else if (tool === "place" && canPlaceParts()) {
-    canvas.selection = false;
     canvas.skipTargetFind = false;
   } else if (tool === "pan") {
     canvas.skipTargetFind = true;
@@ -2241,149 +2529,20 @@ function updateCanvasCursor() {
     canvas.setCursor("crosshair");
     return;
   }
-  if (activeTool === "line" || activeTool === "zone") {
+  if (activeTool === "zone") {
     canvas.setCursor("crosshair");
     return;
   }
   if (pendingPlacementZone) {
-    canvas.setCursor("move");
+    canvas.setCursor("default");
     return;
   }
   canvas.setCursor("default");
 }
 
-let shapeHandler = null;
-
-function enableShapeDraw(kind) {
-  disableShapeDraw();
-  shapeDrawInProgress = { start: null, shape: null, liveDimLabel: null };
-
-  shapeHandler = (opt) => {
-    const raw = canvas.getPointer(opt.e);
-    if (!isInsideWorkBoundary(raw) && opt.e.type === "mousedown") {
-      flashStatus("枠の外");
-      return;
-    }
-    const ptr = snapPoint(raw, canvas, opt.e);
-    const t = opt.e.type;
-    if (t === "mousedown") {
-      shapeDrawInProgress.start = ptr;
-      shapeDrawInProgress.shape = new fabric.Line([ptr.x, ptr.y, ptr.x, ptr.y], {
-        stroke: "#ef4444",
-        strokeWidth: 2,
-        selectable: false,
-        evented: false,
-        _skipHistory: true,
-      });
-      canvas.add(shapeDrawInProgress.shape);
-    } else if (t === "mousemove" && shapeDrawInProgress.start && shapeDrawInProgress.shape) {
-      shapeDrawInProgress.shape.set({ x2: ptr.x, y2: ptr.y });
-      const metrics = segmentMetrics(shapeDrawInProgress.start, ptr, drawingImage, currentMmPerImagePx);
-      showDrawDimHud(metrics);
-      const text = formatEdgeLength(metrics);
-      const mx = (shapeDrawInProgress.start.x + ptr.x) / 2;
-      const my = (shapeDrawInProgress.start.y + ptr.y) / 2;
-      if (!shapeDrawInProgress.liveDimLabel) {
-        shapeDrawInProgress.liveDimLabel = new fabric.Text(text, {
-          left: mx,
-          top: my - 8,
-          fontSize: 11,
-          fill: "#1e40af",
-          fontWeight: "600",
-          backgroundColor: "rgba(255,255,255,0.9)",
-          originX: "center",
-          originY: "bottom",
-          selectable: false,
-          evented: false,
-          _skipHistory: true,
-        });
-        canvas.add(shapeDrawInProgress.liveDimLabel);
-      } else {
-        shapeDrawInProgress.liveDimLabel.set({ text, left: mx, top: my - 8 });
-      }
-      canvas.requestRenderAll();
-    } else if (t === "mouseup" && shapeDrawInProgress.start && shapeDrawInProgress.shape) {
-      const x1 = shapeDrawInProgress.start.x;
-      const y1 = shapeDrawInProgress.start.y;
-      const x2 = ptr.x;
-      const y2 = ptr.y;
-      if (!isInsideWorkBoundary({ x: x2, y: y2 })) {
-        cancelShapeDrawInProgress();
-        setTool("select");
-        flashStatus("枠の外");
-        return;
-      }
-      const metrics = segmentMetrics(shapeDrawInProgress.start, ptr, drawingImage, currentMmPerImagePx);
-      canvas.remove(shapeDrawInProgress.shape);
-      if (shapeDrawInProgress.liveDimLabel) canvas.remove(shapeDrawInProgress.liveDimLabel);
-      hideDrawDimHud();
-
-      const cx = (x1 + x2) / 2;
-      const cy = (y1 + y2) / 2;
-      const line = new fabric.Line([x1 - cx, y1 - cy, x2 - cx, y2 - cy], {
-        stroke: "#ef4444",
-        strokeWidth: 2,
-      });
-      const label = new fabric.Text(formatEdgeLength(metrics), {
-        left: 0,
-        top: -10,
-        fontSize: 11,
-        fill: "#1e40af",
-        fontWeight: "600",
-        backgroundColor: "rgba(255,255,255,0.9)",
-        originX: "center",
-        originY: "bottom",
-      });
-      const group = new fabric.Group([line, label], {
-        left: cx,
-        top: cy,
-        originX: "center",
-        originY: "center",
-        objectType: "measureLine",
-        evented: true,
-        hoverCursor: "pointer",
-        subTargetCheck: false,
-        perPixelTargetFind: true,
-      });
-      canvas.add(group);
-      canvas.setActiveObject(group);
-
-      shapeDrawInProgress = null;
-      pushHistory();
-      setTool("select");
-    }
-  };
-  canvas.on("mouse:down", shapeHandler);
-  canvas.on("mouse:move", shapeHandler);
-  canvas.on("mouse:up", shapeHandler);
-}
-
-function cancelShapeDrawInProgress() {
-  if (!shapeDrawInProgress) return;
-  if (shapeDrawInProgress.shape) canvas.remove(shapeDrawInProgress.shape);
-  if (shapeDrawInProgress.liveDimLabel) canvas.remove(shapeDrawInProgress.liveDimLabel);
-  shapeDrawInProgress = null;
-  hideDrawDimHud();
-  canvas.requestRenderAll();
-}
-
-function disableShapeDraw() {
-  cancelShapeDrawInProgress();
-  if (polygonCleanup) {
-    polygonCleanup();
-    polygonCleanup = null;
-  }
-  hideDrawDimHud();
-  if (!shapeHandler) return;
-  canvas.off("mouse:down", shapeHandler);
-  canvas.off("mouse:move", shapeHandler);
-  canvas.off("mouse:up", shapeHandler);
-  shapeHandler = null;
-}
-
 function deleteSelected() {
   if (pendingPlacementZone) {
-    cancelZonePlacement();
+    cancelZoneVertexEdit();
     return;
   }
   canvas.getActiveObjects().forEach((o) => canvas.remove(o));
@@ -2409,6 +2568,7 @@ function setupPropsForm() {
   });
 
   bind("prop-label", () => applyPropToSelection("label"));
+  bind("prop-zone-memo", () => applyPropToSelection("memo"));
   bind("prop-width", () => applyPropToSelection("width"));
   bind("prop-height", () => applyPropToSelection("height"));
   bind("prop-mm-w", () => applyPropToSelection("mmW"));
@@ -2426,6 +2586,10 @@ function applyPropToSelection(field) {
     if (field === "label") {
       obj.set("zoneName", document.getElementById("prop-label").value.trim());
       updateZoneLabel(obj);
+      refreshZoneHooksList();
+    }
+    if (field === "memo") {
+      obj.set("zoneMemo", document.getElementById("prop-zone-memo").value);
     }
     if (field === "fill") {
       updateZoneColors(obj, document.getElementById("prop-fill").value, obj.zoneOpacity);
@@ -2546,6 +2710,8 @@ function updateProps() {
   const obj = canvas.getActiveObject();
   const content = document.getElementById("props-content");
   const form = document.getElementById("props-form");
+  const memoField = document.getElementById("prop-zone-memo-field");
+  if (memoField) memoField.hidden = true;
 
   if (pendingPlacementZone) {
     const z = pendingPlacementZone;
@@ -2611,31 +2777,32 @@ function updateProps() {
     if (obj.objectType === "fillArea") upgradeZoneObject(obj);
     applyInteractiveControls(obj);
     form.hidden = false;
-    const memo = obj.zoneMemo?.trim();
     const metrics = obj._zoneMetrics;
     const sizeBlock = metrics
       ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(obj)).replace("\n", " · "))}</p>`
       : "";
     content.innerHTML = `
-      <p class="prop-meta">${esc(obj.zoneName || "区画")}</p>
       ${sizeBlock}
       ${renderZoneDimToggles(obj)}
-      ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : ""}
       <div class="zone-prop-actions">
-        <button class="btn btn-primary btn-sm" id="btn-edit-zone">✎</button>
-        <button class="btn btn-danger btn-sm zone-delete-btn" id="btn-delete-zone" title="削除">🗑</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btn-shape-zone">⬡ 形を修正</button>
+        <button type="button" class="btn btn-danger btn-sm zone-delete-btn" id="btn-delete-zone" title="削除">🗑</button>
       </div>
     `;
     bindZoneDimToggles(obj);
-    document.getElementById("btn-edit-zone")?.addEventListener("click", () => openZoneModal(obj));
+    document.getElementById("btn-shape-zone")?.addEventListener("click", () => {
+      enterZoneVertexEditMode(obj, false);
+    });
     document.getElementById("btn-delete-zone")?.addEventListener("click", () => deleteZone(obj));
     document.getElementById("prop-label").closest(".prop-field").hidden = false;
+    if (memoField) memoField.hidden = false;
     document.querySelectorAll("#props-form .prop-row").forEach((row) => {
       row.hidden = true;
     });
     document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
     document.getElementById("prop-stroke").closest(".prop-field").hidden = true;
     document.getElementById("prop-label").value = obj.zoneName || "";
+    document.getElementById("prop-zone-memo").value = obj.zoneMemo || "";
     document.getElementById("prop-fill").value = rgbToHex(obj.zoneColor) || "#f59e0b";
     return;
   }
@@ -2917,6 +3084,133 @@ function exportPng() {
   flashStatus("PNGをダウンロードしました");
 }
 
+// ── Keyboard nudge (arrow keys) ───────────────────
+const NUDGE_STEP_FINE = 1;
+const NUDGE_STEP_FAST = 10;
+const NUDGE_HOLD_DELAY_MS = 350;
+const NUDGE_FAST_INTERVAL_MS = 45;
+
+let nudgeHoldTimer = null;
+let nudgeFastInterval = null;
+let nudgeDirty = false;
+let nudgeActiveKey = null;
+
+function nudgeDeltaForKey(key) {
+  switch (key) {
+    case "ArrowLeft": return { dx: -1, dy: 0 };
+    case "ArrowRight": return { dx: 1, dy: 0 };
+    case "ArrowUp": return { dx: 0, dy: -1 };
+    case "ArrowDown": return { dx: 0, dy: 1 };
+    default: return null;
+  }
+}
+
+function clearNudgeRepeat() {
+  if (nudgeHoldTimer) {
+    clearTimeout(nudgeHoldTimer);
+    nudgeHoldTimer = null;
+  }
+  if (nudgeFastInterval) {
+    clearInterval(nudgeFastInterval);
+    nudgeFastInterval = null;
+  }
+  nudgeActiveKey = null;
+}
+
+function canNudgeSelection() {
+  if (!canvas || activeTool !== "select") return false;
+  if (pendingPlacementZone || zoneVertexEditCleanup) return false;
+  if (scaleCalibCleanup || scaleCalibPendingPoints) return false;
+  const obj = canvas.getActiveObject();
+  if (!obj || obj.type === "activeSelection") return false;
+  if (!obj.objectType || obj.objectType === "workBoundary") return false;
+  if (obj.lockMovementX && obj.lockMovementY) return false;
+  return true;
+}
+
+function nudgeSelectedObject(dx, dy, fast = false) {
+  const step = fast ? NUDGE_STEP_FAST : NUDGE_STEP_FINE;
+  const obj = canvas.getActiveObject();
+  if (!obj) return;
+
+  if (obj.objectType === "drawing" && drawingImage && !drawingTransformBefore) {
+    drawingTransformBefore = captureDrawingState(drawingImage);
+  }
+
+  obj.set({
+    left: obj.left + dx * step,
+    top: obj.top + dy * step,
+  });
+  obj.setCoords();
+
+  if (obj.objectType === "zone") {
+    refreshZoneOnCanvas(obj, computeZoneMetricsFor(obj));
+  }
+  updatePropsLive();
+  nudgeDirty = true;
+  canvas.requestRenderAll();
+}
+
+function finishNudgeSession() {
+  if (!nudgeDirty) return;
+  nudgeDirty = false;
+  const obj = canvas?.getActiveObject();
+  if (!obj) return;
+
+  if (obj.objectType === "zone") {
+    refreshZoneOnCanvas(obj, computeZoneMetricsFor(obj));
+    refreshZoneHooksList();
+  }
+  if (obj.objectType === "drawing") {
+    onDrawingTransformEnd();
+    return;
+  }
+  pushHistory();
+  updateProps();
+  scheduleAutoSave();
+}
+
+function handleArrowKeyDown(e) {
+  const delta = nudgeDeltaForKey(e.key);
+  if (!delta || !canNudgeSelection()) return;
+
+  e.preventDefault();
+
+  if (e.repeat && nudgeFastInterval) return;
+
+  if (nudgeActiveKey && e.key !== nudgeActiveKey) {
+    finishNudgeSession();
+    clearNudgeRepeat();
+  }
+
+  nudgeActiveKey = e.key;
+  nudgeSelectedObject(delta.dx, delta.dy, false);
+
+  if (!nudgeHoldTimer && !nudgeFastInterval) {
+    nudgeHoldTimer = setTimeout(() => {
+      nudgeHoldTimer = null;
+      const key = nudgeActiveKey;
+      const held = nudgeDeltaForKey(key);
+      if (!held) return;
+      nudgeFastInterval = setInterval(() => {
+        if (nudgeActiveKey !== key || !canNudgeSelection()) {
+          clearNudgeRepeat();
+          finishNudgeSession();
+          return;
+        }
+        nudgeSelectedObject(held.dx, held.dy, true);
+      }, NUDGE_FAST_INTERVAL_MS);
+    }, NUDGE_HOLD_DELAY_MS);
+  }
+}
+
+function handleArrowKeyUp(e) {
+  if (!nudgeDeltaForKey(e.key)) return;
+  if (e.key !== nudgeActiveKey) return;
+  clearNudgeRepeat();
+  finishNudgeSession();
+}
+
 // ── Keyboard ──────────────────────────────────────
 function setupKeyboard() {
   document.addEventListener("keydown", (e) => {
@@ -2933,12 +3227,12 @@ function setupKeyboard() {
     if (pendingPlacementZone) {
       if (e.key === "Enter") {
         e.preventDefault();
-        confirmZonePlacement();
+        confirmZoneVertexEdit();
         return;
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        cancelZonePlacement();
+        cancelZoneVertexEdit();
         return;
       }
     }
@@ -2956,14 +3250,19 @@ function setupKeyboard() {
     else if (e.key === "z" || e.key === "Z") setTool("zone");
     if (e.key === "v" || e.key === "V") setTool("select");
     if (e.key === "h" || e.key === "H") setTool("pan");
-    if (e.key === "p" || e.key === "P") setTool("pen");
+    handleArrowKeyDown(e);
   });
   document.addEventListener("keyup", (e) => {
+    handleArrowKeyUp(e);
     if (e.code === "Space") {
       spaceDown = false;
       isPanning = false;
       updateCanvasCursor();
     }
+  });
+  window.addEventListener("blur", () => {
+    clearNudgeRepeat();
+    finishNudgeSession();
   });
 }
 

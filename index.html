@@ -21,10 +21,10 @@
         <label class="topbar-label">案
           <select id="project-select"></select>
         </label>
-        <button class="btn btn-ghost btn-xs" id="btn-import-proposal" title="リニューアル案を取り込み">＋ 案</button>
         <label class="topbar-label">図面
           <select id="drawing-select"></select>
         </label>
+        <button class="btn btn-ghost btn-xs" id="btn-sheet-copy" title="区画・草図などを別図面へコピー">コピー</button>
         <button class="btn btn-ghost btn-sm" id="btn-prev-page" disabled>←</button>
         <span id="page-info" class="page-info">—</span>
         <button class="btn btn-ghost btn-sm" id="btn-next-page" disabled>→</button>
@@ -34,13 +34,6 @@
         <button class="tool-btn" data-tool="select" title="選択・図面クリックでサイズ変更 (V)">↖ 選択</button>
         <button class="tool-btn active" data-tool="zone" title="角をクリックして線で区画を囲む (Z)">⬡ 区画</button>
         <button class="tool-btn" data-tool="pan" title="図面をドラッグして移動 (H)">✋ 移動</button>
-        <details class="tool-more">
-          <summary>その他</summary>
-          <div class="tool-more-inner">
-            <button class="tool-btn" data-tool="pen" title="フリーハンド (P)">✏ ペン</button>
-            <button class="tool-btn" data-tool="line" title="直線">／ 線</button>
-          </div>
-        </details>
       </div>
 
       <div class="topbar-group draw-style">
@@ -58,13 +51,15 @@
       </div>
     </header>
 
-    <div class="workspace">
-      <aside class="palette-panel zone-sidebar">
+    <div class="workspace" id="workspace">
+      <aside class="palette-panel zone-sidebar" id="zone-sidebar">
+        <div class="zone-sidebar-inner">
         <div class="panel-header-row">
           <div class="panel-title">区分</div>
           <div class="hook-toolbar">
             <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-expand-all" title="展開">＋</button>
             <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-collapse-all" title="折畳">−</button>
+            <button type="button" class="btn btn-ghost btn-xs zone-sidebar-close" id="btn-zone-sidebar-close" title="隠す">×</button>
           </div>
         </div>
         <div class="zone-custom-section">
@@ -83,16 +78,19 @@
           <div id="marks-palette" class="marks-grid"></div>
         </div>
         <button class="btn btn-danger btn-block" id="btn-clear-zones">区画クリア</button>
+        </div>
+        <div class="zone-sidebar-resizer" id="zone-sidebar-resizer" title="ドラッグで幅を変更"></div>
       </aside>
+      <button type="button" class="zone-sidebar-fab" id="zone-sidebar-fab" hidden title="区分を表示">区分</button>
 
       <div class="canvas-area">
         <div id="canvas-wrap" class="canvas-wrap">
           <canvas id="design-canvas"></canvas>
           <div id="memo-tooltip" class="memo-tooltip" hidden></div>
-          <div id="zone-tooltip" class="zone-tooltip" hidden></div>
           <div id="draw-dim-hud" class="draw-dim-hud" hidden>横 — 縦 —</div>
           <div id="zone-place-hud" class="zone-place-hud" hidden>
-            <button type="button" class="btn btn-primary btn-xs zone-place-confirm" id="btn-zone-place-confirm">Enter</button>
+            <span class="zone-place-hint">角をドラッグで変形</span>
+            <button type="button" class="btn btn-primary btn-xs zone-place-confirm" id="btn-zone-place-confirm">Enter 確定</button>
             <button type="button" class="btn btn-ghost btn-xs" id="btn-zone-place-cancel">Esc</button>
           </div>
           <div id="scale-calib-hud" class="scale-calib-hud">
@@ -119,6 +117,9 @@
         <div id="props-form" hidden>
           <label class="prop-field">名称
             <input type="text" id="prop-label" />
+          </label>
+          <label class="prop-field" id="prop-zone-memo-field" hidden>メモ
+            <textarea id="prop-zone-memo" rows="4" placeholder="面積感、用途、制約、要望など"></textarea>
           </label>
           <div class="prop-row">
             <label class="prop-field">幅 (px)
@@ -154,27 +155,37 @@
     </div>
   </div>
 
-  <!-- リニューアル案取込 -->
-  <dialog id="proposal-modal" class="modal">
-    <form id="proposal-form" method="dialog">
+  <!-- 図面データコピー -->
+  <dialog id="sheet-copy-modal" class="modal">
+    <form id="sheet-copy-form" method="dialog">
       <header class="modal-header">
-        <h3>リニューアル案を取り込み</h3>
+        <h3>図面データをコピー</h3>
         <button type="button" class="btn-close" data-close>×</button>
       </header>
       <div class="modal-body">
-        <label class="prop-field">案の名称 <span class="req">*</span>
-          <input type="text" id="proposal-name" required placeholder="例：田中案・2025春" />
-        </label>
-        <label class="prop-field">作成者
-          <input type="text" id="proposal-author" placeholder="任意" />
-        </label>
-        <label class="prop-field">画像ファイル <span class="req">*</span>
-          <input type="file" id="proposal-image" accept="image/*,.pdf" required />
-        </label>
+        <p class="modal-note">区画・草図・縮尺・作業枠など、保存されている内容を別の図面へそのまま複製します（全ページ）。</p>
+        <fieldset class="copy-fieldset">
+          <legend>コピー元</legend>
+          <label class="prop-field">案
+            <select id="copy-from-project" required></select>
+          </label>
+          <label class="prop-field">図面
+            <select id="copy-from-sheet" required></select>
+          </label>
+        </fieldset>
+        <fieldset class="copy-fieldset">
+          <legend>コピー先</legend>
+          <label class="prop-field">案
+            <select id="copy-to-project" required></select>
+          </label>
+          <label class="prop-field">図面
+            <select id="copy-to-sheet" required></select>
+          </label>
+        </fieldset>
       </div>
       <footer class="modal-footer">
         <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
-        <button type="submit" class="btn btn-primary">取り込む</button>
+        <button type="submit" class="btn btn-primary">コピーする</button>
       </footer>
     </form>
   </dialog>
@@ -204,46 +215,6 @@
       </div>
       <footer class="modal-footer">
         <button type="button" class="btn btn-danger" id="custom-preset-delete" hidden>削除</button>
-        <div class="modal-actions">
-          <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
-          <button type="submit" class="btn btn-primary">保存</button>
-        </div>
-      </footer>
-    </form>
-  </dialog>
-
-  <!-- 区画タップ時：修正 or 削除 -->
-  <dialog id="zone-action-modal" class="modal modal-compact">
-    <header class="modal-header">
-      <h3 id="zone-action-title">区画</h3>
-      <button type="button" class="btn-close" data-close>×</button>
-    </header>
-    <div class="modal-body">
-      <p id="zone-action-memo" class="zone-action-memo"></p>
-      <div class="zone-action-buttons">
-        <button type="button" class="btn btn-primary" id="zone-action-edit">✎ 修正</button>
-        <button type="button" class="btn btn-danger zone-delete-btn" id="zone-action-delete" title="区画を削除">🗑 削除</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- 区画メモ（修正用） -->
-  <dialog id="zone-modal" class="modal">
-    <form id="zone-form" method="dialog">
-      <header class="modal-header">
-        <h3>区画メモ</h3>
-        <button type="button" class="btn-close" data-close>×</button>
-      </header>
-      <div class="modal-body">
-        <label class="prop-field">エリア名 <span class="req">*</span>
-          <input type="text" id="zone-name" required placeholder="例：FWエリア" />
-        </label>
-        <label class="prop-field">メモ
-          <textarea id="zone-memo" rows="4" placeholder="面積感、用途、制約、要望など"></textarea>
-        </label>
-      </div>
-      <footer class="modal-footer">
-        <button type="button" class="btn btn-danger" id="zone-delete" hidden>区画を削除</button>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
           <button type="submit" class="btn btn-primary">保存</button>
