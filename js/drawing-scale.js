@@ -1,3 +1,19 @@
+export function pointInPolygon(point, polygon) {
+  if (!polygon?.length) return true;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const intersect =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi || 1e-9) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 const TSUBO_PER_M2 = 1 / 3.305785;
 export const M2_PER_TSUBO = 3.305785;
 

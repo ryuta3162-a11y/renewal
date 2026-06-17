@@ -9,6 +9,9 @@ import {
 import {
   snapPoint,
   setSnapEnabled,
+  isInsideWorkBoundary,
+  setWorkBoundaryPoints,
+  getWorkBoundaryPoints,
 } from "./draw-tools.js";
 import {
   ZONE_PRESETS,
@@ -46,7 +49,6 @@ import {
   segmentMetrics,
   formatZoneSizeText,
   formatZoneSizeShort,
-  formatScaleStatus,
   formatEdgeLength,
 } from "./drawing-scale.js";
 import {
@@ -114,6 +116,9 @@ let scaleCalibrated = false;
 let scaleCalibSummary = null;
 let scaleCalibCleanup = null;
 let scaleCalibPendingPoints = null;
+let scaleHudMinimized = false;
+let workBoundaryObject = null;
+let shapeDrawInProgress = null;
 let autoSaveTimer = null;
 let lastSavedAt = null;
 const history = [];
@@ -255,11 +260,35 @@ function initCanvas() {
     e.stopPropagation();
   });
 
+  canvas.on("path:created", (e) => {
+    const path = e.path;
+    if (!path) return;
+    path.set({ objectType: "sketch" });
+    if (!isInsideWorkBoundary(path.getCenterPoint())) {
+      canvas.remove(path);
+      flashStatus("枠の外");
+    } else {
+      pushHistory();
+      scheduleAutoSave();
+    }
+  });
+
   canvas.on("mouse:down", onCanvasMouseDown);
   canvas.on("mouse:move", onCanvasMouseMove);
   canvas.on("mouse:up", onCanvasMouseUp);
 
-  canvasWrap.addEventListener("contextmenu", (e) => e.preventDefault());
+  const blockContextMenu = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  canvasWrap.addEventListener("contextmenu", blockContextMenu, true);
+  canvas.upperCanvasEl?.addEventListener("contextmenu", blockContextMenu, true);
+  canvas.lowerCanvasEl?.addEventListener("contextmenu", blockContextMenu, true);
+  canvas.on("contextmenu", (opt) => {
+    opt.e.preventDefault();
+    opt.e.stopPropagation();
+  });
+
   canvasWrap.addEventListener("mousedown", (e) => {
     if (e.button === 1) e.preventDefault();
   });
@@ -428,6 +457,7 @@ async function loadDrawing(id) {
     const saved = loadDesign(pageKey());
     scaleCalibrated = !!saved?.scaleCalibrated;
     scaleCalibSummary = saved?.scaleCalibSummary ?? null;
+    scaleHudMinimized = saved?.scaleHudMinimized ?? !!saved?.scaleCalibrated;
     await loadSheetBackground(sheet);
     resizeCanvas();
     placeDrawingOnCanvas(saved?.drawingTransform);
@@ -437,6 +467,9 @@ async function loadDrawing(id) {
     fillScaleTsuboFromSheet();
     refreshAllZoneMetrics();
     updateScaleUI();
+    if (saved?.workBoundaryCanvasPoints?.length) {
+      applyWorkBoundary(saved.workBoundaryCanvasPoints);
+    }
     isRestoringHistory = false;
     applyMachinesVisibility();
     refreshZoneHooksList();
@@ -542,7 +575,10 @@ function applySavedDrawingTransform(t) {
 
 function getUserObjects() {
   return canvas.getObjects().filter(
-    (o) => o.objectType !== "drawing" && !o._zonePendingFix
+    (o) =>
+      o.objectType !== "drawing" &&
+      o.objectType !== "workBoundary" &&
+      !o._zonePendingFix
   );
 }
 
@@ -615,6 +651,7 @@ async function reloadPage() {
   const saved = loadDesign(pageKey());
   scaleCalibrated = !!saved?.scaleCalibrated;
   scaleCalibSummary = saved?.scaleCalibSummary ?? null;
+  scaleHudMinimized = saved?.scaleHudMinimized ?? !!saved?.scaleCalibrated;
   resizeCanvas();
   placeDrawingOnCanvas(saved?.drawingTransform);
   await restoreDesign(pageKey(), saved, { skipViewport: true });
@@ -623,6 +660,9 @@ async function reloadPage() {
   fillScaleTsuboFromSheet();
   refreshAllZoneMetrics();
   updateScaleUI();
+  if (saved?.workBoundaryCanvasPoints?.length) {
+    applyWorkBoundary(saved.workBoundaryCanvasPoints);
+  }
   isRestoringHistory = false;
   persistCurrent();
   pushHistory(true);
@@ -715,7 +755,7 @@ function enterZonePlacementMode(zone) {
   updateDrawingInteractivity();
   updateProps();
   canvas.requestRenderAll();
-  flashStatus(`「${zone.zoneName || "区画"}」— ドラッグで位置調整 → Enter で固定`);
+  flashStatus("Enter で固定");
 }
 
 function confirmZonePlacement() {
@@ -753,7 +793,7 @@ function cancelZonePlacement() {
   refreshZoneHooksList();
   updateProps();
   canvas.requestRenderAll();
-  flashStatus("区画の配置を取消しました");
+  flashStatus("取消");
 }
 
 function discardPendingPlacementIfNeeded(actionLabel) {
@@ -779,9 +819,9 @@ function finalizeNewZone(zone) {
     scheduleAutoSave();
     const name = zone.zoneName || "区画";
     if (currentMmPerImagePx) {
-      flashStatus(`「${name}」を固定しました（各辺の長さ・㎡を表示）`);
+      flashStatus(`「${name}」固定`);
     } else {
-      flashStatus(`「${name}」を固定しました — 下の初期測定を行うとサイズが出ます`);
+      flashStatus(`「${name}」追加`);
     }
   } catch (err) {
     console.error(err);
@@ -848,45 +888,132 @@ function fillScaleTsuboFromSheet() {
   if (sheet?.planAreaTsubo) input.value = sheet.planAreaTsubo;
 }
 
-function setScaleCalibStep(text) {
-  const stepEl = document.getElementById("scale-calib-step");
-  if (stepEl && text) stepEl.textContent = text;
+function renderWorkBoundaryOverlay() {
+  if (workBoundaryObject) {
+    canvas.remove(workBoundaryObject);
+    workBoundaryObject = null;
+  }
+  const pts = getWorkBoundaryPoints();
+  if (!pts?.length || !canvas) return;
+  workBoundaryObject = new fabric.Polygon(
+    pts.map((p) => ({ x: p.x, y: p.y })),
+    {
+      fill: "rgba(245,158,11,0.05)",
+      stroke: "#f59e0b",
+      strokeWidth: 2,
+      strokeDashArray: [10, 6],
+      selectable: false,
+      evented: false,
+      objectType: "workBoundary",
+      _skipHistory: true,
+    }
+  );
+  canvas.add(workBoundaryObject);
+  drawingImage?.sendToBack();
+  workBoundaryObject.moveTo((drawingImage ? 1 : 0));
+  canvas.requestRenderAll();
+}
+
+function applyWorkBoundary(points) {
+  setWorkBoundaryPoints(points);
+  renderWorkBoundaryOverlay();
+}
+
+function minimizeScaleHud() {
+  scaleHudMinimized = true;
+  updateScaleHudVisibility();
+  scheduleAutoSave();
+}
+
+function expandScaleHud() {
+  scaleHudMinimized = false;
+  updateScaleHudVisibility();
+}
+
+function updateScaleHudVisibility() {
+  const hud = document.getElementById("scale-calib-hud");
+  const fab = document.getElementById("scale-calib-fab");
+  const closeBtn = document.getElementById("btn-scale-hud-close");
+  const isDone = !!(currentMmPerImagePx && scaleCalibrated);
+
+  if (!isDone) {
+    hud?.removeAttribute("hidden");
+    fab?.setAttribute("hidden", "");
+    closeBtn?.setAttribute("hidden", "");
+    return;
+  }
+
+  if (scaleHudMinimized) {
+    hud?.setAttribute("hidden", "");
+    fab?.removeAttribute("hidden");
+    if (fab && scaleCalibSummary?.knownTsubo != null) {
+      fab.textContent = "○";
+      fab.title = `${scaleCalibSummary.knownTsubo}坪`;
+    }
+  } else {
+    hud?.removeAttribute("hidden");
+    fab?.setAttribute("hidden", "");
+    closeBtn?.removeAttribute("hidden");
+  }
 }
 
 function setScaleCalibMode(mode) {
   const applyBtn = document.getElementById("btn-scale-apply");
   const cancelBtn = document.getElementById("btn-scale-cancel");
   const calibBtn = document.getElementById("btn-area-calibrate");
+  const hud = document.getElementById("scale-calib-hud");
+  const badge = document.getElementById("scale-badge");
   if (applyBtn) applyBtn.hidden = mode !== "ready";
   if (cancelBtn) cancelBtn.hidden = mode === "idle";
   if (calibBtn) calibBtn.disabled = mode === "drawing";
+  hud?.classList.toggle("scale-calib-hud--drawing", mode === "drawing");
   canvasWrap?.classList.toggle("scale-calibrating", mode === "drawing");
+  if (mode === "drawing" && badge && !scaleCalibrated) {
+    badge.textContent = "採寸中";
+    badge.className = "scale-badge tentative";
+  } else if (mode === "ready" && badge) {
+    badge.textContent = "坪→確定";
+    badge.className = "scale-badge tentative";
+  } else if (!scaleCalibrated) {
+    updateScaleUI();
+  }
 }
 
 function updateScaleUI() {
-  const el = document.getElementById("scale-status");
+  const hud = document.getElementById("scale-calib-hud");
   const badge = document.getElementById("scale-badge");
-  if (!el) return;
-  if (!currentMmPerImagePx) {
-    el.textContent = "";
-    if (badge) {
-      badge.textContent = "未設定";
-      badge.className = "scale-badge tentative";
+  const doneLine = document.getElementById("scale-calib-done-line");
+  const doneText = document.getElementById("scale-calib-done-text");
+  const summary = document.getElementById("scale-calib-summary");
+  const calibBtn = document.getElementById("btn-area-calibrate");
+  const isDone = !!(currentMmPerImagePx && scaleCalibrated && scaleCalibSummary);
+
+  hud?.classList.toggle("scale-calib-hud--done", isDone);
+  if (doneLine) doneLine.hidden = !isDone;
+  if (doneText) doneText.hidden = !isDone;
+  if (summary) summary.hidden = !isDone;
+
+  if (isDone) {
+    const s = scaleCalibSummary;
+    if (summary) {
+      summary.textContent = `${s.knownTsubo}坪 · 横${s.widthM.toFixed(1)}m 縦${s.depthM.toFixed(1)}m`;
     }
-    return;
-  }
-  if (scaleCalibrated) {
-    el.textContent = formatScaleStatus(currentMmPerImagePx, scaleCalibSummary);
     if (badge) {
-      badge.textContent = "設定済み";
+      badge.textContent = "完了";
       badge.className = "scale-badge ok";
     }
-  } else {
-    el.textContent = "※仮の値 — 下の初期測定を行ってください";
-    if (badge) {
-      badge.textContent = "仮";
-      badge.className = "scale-badge tentative";
-    }
+    if (calibBtn) calibBtn.textContent = "やり直し";
+    updateScaleHudVisibility();
+    return;
+  }
+
+  scaleHudMinimized = false;
+  updateScaleHudVisibility();
+
+  if (calibBtn) calibBtn.textContent = "縦横採寸";
+  if (badge) {
+    badge.textContent = "未設定";
+    badge.className = "scale-badge tentative";
   }
 }
 
@@ -898,16 +1025,15 @@ function cancelScaleCalibration() {
   scaleCalibPendingPoints = null;
   removeScalePreviews();
   setScaleCalibMode("idle");
-  setScaleCalibStep("縦横採寸 → 敷地の角をクリック → 坪を入力 → 確定");
 }
 
 function applyScaleFromPolygon(tsubo) {
   if (!scaleCalibPendingPoints?.length) {
-    flashStatus("先に縦横採寸で敷地全体を囲んでください");
+    flashStatus("先に縦横採寸で囲んでください");
     return false;
   }
   if (!tsubo || tsubo <= 0) {
-    flashStatus("坪を半角数字で入力してください");
+    flashStatus("坪を入力");
     document.getElementById("scale-known-tsubo")?.focus();
     return false;
   }
@@ -917,7 +1043,7 @@ function applyScaleFromPolygon(tsubo) {
   const areaPx = polygonAreaImagePx(scaleCalibPendingPoints, drawingImage);
   const mmPerPx = mmPerImagePxFromAreaPx(knownM2, areaPx);
   if (!mmPerPx) {
-    flashStatus("採寸に失敗しました。もう一度お試しください");
+    flashStatus("失敗 — やり直してください");
     return false;
   }
 
@@ -926,6 +1052,7 @@ function applyScaleFromPolygon(tsubo) {
     drawingImage,
     mmPerPx
   );
+  const boundaryPts = [...scaleCalibPendingPoints];
   currentMmPerImagePx = mmPerPx;
   scaleCalibrated = true;
   scaleCalibSummary = {
@@ -935,21 +1062,21 @@ function applyScaleFromPolygon(tsubo) {
     knownTsubo: tsubo,
   };
   cancelScaleCalibration();
+  applyWorkBoundary(boundaryPts);
+  scaleHudMinimized = true;
   refreshAllZoneMetrics();
   updateScaleUI();
   refreshZoneHooksList();
   pushHistory();
   scheduleAutoSave();
-  flashStatus(
-    `初期測定完了 — 横 ${scaleCalibSummary.widthM.toFixed(1)}m　縦 ${scaleCalibSummary.depthM.toFixed(1)}m（${tsubo}坪）`
-  );
+  flashStatus(`測定完了 ${tsubo}坪`);
   return true;
 }
 
 function setupScaleUI() {
   document.getElementById("btn-area-calibrate")?.addEventListener("click", () => {
     if (!drawingImage) {
-      flashStatus("図面を読み込んでから採寸してください");
+      flashStatus("図面を読み込んでください");
       return;
     }
     startCalibPolygonDraw();
@@ -962,7 +1089,14 @@ function setupScaleUI() {
 
   document.getElementById("btn-scale-cancel")?.addEventListener("click", () => {
     cancelScaleCalibration();
-    flashStatus("初期測定をキャンセルしました");
+  });
+
+  document.getElementById("btn-scale-hud-close")?.addEventListener("click", () => {
+    minimizeScaleHud();
+  });
+
+  document.getElementById("scale-calib-fab")?.addEventListener("click", () => {
+    expandScaleHud();
   });
 
   document.getElementById("scale-known-tsubo")?.addEventListener("keydown", (e) => {
@@ -975,6 +1109,8 @@ function setupScaleUI() {
 }
 
 function startCalibPolygonDraw() {
+  expandScaleHud();
+  applyWorkBoundary(null);
   cancelScaleCalibration();
   if (polygonCleanup) {
     polygonCleanup();
@@ -983,23 +1119,17 @@ function startCalibPolygonDraw() {
   removeOrphanZonePreviews(canvas);
 
   setScaleCalibMode("drawing");
-  setScaleCalibStep("敷地の角をクリック（始点をクリック or Enter で閉じる · Escで取消）");
 
   scaleCalibCleanup = enableCalibPolygonDraw(canvas, (points) => {
     scaleCalibCleanup = null;
     if (!points?.length) {
       cancelScaleCalibration();
-      flashStatus("初期測定をキャンセルしました");
       return;
     }
     scaleCalibPendingPoints = points;
     setScaleCalibMode("ready");
-    setScaleCalibStep("図面の坪を半角数字で入力して「確定」");
     document.getElementById("scale-known-tsubo")?.focus();
-    flashStatus("敷地を囲みました — 坪を入力して確定してください");
   });
-
-  flashStatus("敷地の角をクリックして全体を囲んでください（始点で閉じる / Enter）");
 }
 
 const HOOK_STATE_KEY = "renewal-zone-hook-collapsed";
@@ -1028,7 +1158,7 @@ function buildZoneHooks() {
 
   const customs = getAllZonePresets().filter((p) => p.isCustom);
   if (!customs.length) {
-    customContainer.innerHTML = `<p class="zone-custom-empty">「＋ 追加」で名称・色を自由に設定</p>`;
+    customContainer.innerHTML = "";
   } else {
     customs.forEach((preset) => {
       customContainer.appendChild(createZoneHookElement(preset, collapsed, true));
@@ -1043,7 +1173,9 @@ function buildZoneHooks() {
     const first =
       customContainer.querySelector(".zone-hook") || standardContainer.querySelector(".zone-hook");
     first?.classList.remove("collapsed");
-    first?.querySelector(".zone-hook-header")?.setAttribute("aria-expanded", "true");
+    first?.querySelector(".btn-zone-open")?.setAttribute("aria-expanded", "true");
+    const firstOpen = first?.querySelector(".btn-zone-open");
+    if (firstOpen) firstOpen.textContent = "閉じる";
   }
 
   if (!pendingZonePreset) pendingZonePreset = ZONE_PRESETS[0];
@@ -1058,41 +1190,50 @@ function createZoneHookElement(preset, collapsed, isCustom) {
   if (collapsed[preset.id]) hook.classList.add("collapsed");
   if (preset.id === pendingZonePreset?.id) hook.classList.add("active");
 
+  const openLabel = collapsed[preset.id] ? "開く" : "閉じる";
+
   const customActions = isCustom
     ? `<button type="button" class="zone-hook-edit" title="区分を編集">✎</button>
        <button type="button" class="zone-hook-del" title="区分を削除">×</button>`
     : "";
 
   hook.innerHTML = `
-    <button type="button" class="zone-hook-header" aria-expanded="${!collapsed[preset.id]}">
+    <div class="zone-hook-title-row">
       <span class="zone-hook-bar" style="background:${preset.color}"></span>
       <span class="zone-hook-title">${esc(preset.name)}</span>
       <span class="zone-hook-count" data-count-for="${preset.id}">0</span>
       ${customActions}
-      <span class="zone-hook-chevron">▼</span>
-    </button>
-    <div class="zone-hook-body">
-      <p class="zone-hook-desc">${esc(preset.desc || "")}</p>
-      <button type="button" class="btn btn-primary btn-sm btn-block btn-draw-zone">区画を描く</button>
-      <ul class="zone-hook-list" data-list-for="${preset.id}"></ul>
     </div>
+    <div class="zone-hook-actions">
+      <button type="button" class="btn-zone-draw">描く</button>
+      <button type="button" class="btn-zone-open" aria-expanded="${!collapsed[preset.id]}">${openLabel}</button>
+    </div>
+    <ul class="zone-hook-list" data-list-for="${preset.id}"></ul>
   `;
 
-  const header = hook.querySelector(".zone-hook-header");
-  header.addEventListener("click", (e) => {
-    if (e.target.closest(".btn-draw-zone, .zone-hook-edit, .zone-hook-del")) return;
+  const openBtn = hook.querySelector(".btn-zone-open");
+
+  hook.querySelector(".zone-hook-title-row")?.addEventListener("click", (e) => {
+    if (e.target.closest(".zone-hook-edit, .zone-hook-del")) return;
+    selectZonePreset(preset, false);
+  });
+
+  openBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
     const isCollapsed = hook.classList.toggle("collapsed");
-    header.setAttribute("aria-expanded", String(!isCollapsed));
+    openBtn.setAttribute("aria-expanded", String(!isCollapsed));
+    openBtn.textContent = isCollapsed ? "開く" : "閉じる";
     const state = loadHookCollapsedState();
     state[preset.id] = isCollapsed;
     saveHookCollapsedState(state);
     selectZonePreset(preset, false);
   });
 
-  hook.querySelector(".btn-draw-zone").addEventListener("click", (e) => {
+  hook.querySelector(".btn-zone-draw").addEventListener("click", (e) => {
     e.stopPropagation();
     hook.classList.remove("collapsed");
-    header.setAttribute("aria-expanded", "true");
+    openBtn.setAttribute("aria-expanded", "true");
+    openBtn.textContent = "閉じる";
     const state = loadHookCollapsedState();
     state[preset.id] = false;
     saveHookCollapsedState(state);
@@ -1177,10 +1318,38 @@ function setAllHooksCollapsed(collapsed) {
   const state = {};
   document.querySelectorAll(".zone-hook").forEach((hook) => {
     hook.classList.toggle("collapsed", collapsed);
-    hook.querySelector(".zone-hook-header")?.setAttribute("aria-expanded", String(!collapsed));
+    const openBtn = hook.querySelector(".btn-zone-open");
+    openBtn?.setAttribute("aria-expanded", String(!collapsed));
+    if (openBtn) openBtn.textContent = collapsed ? "開く" : "閉じる";
     state[hook.dataset.presetId] = collapsed;
   });
   saveHookCollapsedState(state);
+}
+
+function focusViewportOnZone(zone) {
+  if (!zone || !canvas) return;
+  zone.setCoords();
+  const bounds = zone.getBoundingRect(true, true);
+  const pad = 72;
+  const cw = canvas.getWidth();
+  const ch = canvas.getHeight();
+  const zoom = Math.min(
+    (cw - pad * 2) / Math.max(bounds.width, 1),
+    (ch - pad * 2) / Math.max(bounds.height, 1),
+    2.2
+  );
+  const cx = bounds.left + bounds.width / 2;
+  const cy = bounds.top + bounds.height / 2;
+  canvas.setZoom(Math.max(0.25, zoom));
+  const z = canvas.getZoom();
+  const vpt = canvas.viewportTransform.slice();
+  vpt[4] = cw / 2 - cx * z;
+  vpt[5] = ch / 2 - cy * z;
+  canvas.setViewportTransform(vpt);
+  canvas.setActiveObject(zone);
+  canvas.requestRenderAll();
+  scheduleAutoSave();
+  updateProps();
 }
 
 function getZonesOnCanvas() {
@@ -1210,16 +1379,7 @@ function refreshZoneHooksList() {
 
     const matched = zones.filter((z) => resolveZonePresetId(z, allPresets) === preset.id);
 
-    if (!matched.length) {
-      const li = document.createElement("li");
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "zone-hook-item empty";
-      btn.textContent = "まだ区画なし（何個でも追加可）";
-      li.appendChild(btn);
-      list.appendChild(li);
-      return;
-    }
+    if (!matched.length) return;
 
     matched.forEach((zone, i) => {
       const li = document.createElement("li");
@@ -1232,12 +1392,11 @@ function refreshZoneHooksList() {
       const sizeTag = formatZoneSizeShort(zone._zoneMetrics);
       const sizeSuffix = sizeTag ? ` · ${sizeTag}` : "";
       btn.textContent = memo
-        ? `${baseName}${numTag}${sizeSuffix} — ${memo.slice(0, 12)}${memo.length > 12 ? "…" : ""}`
+        ? `${baseName}${numTag}${sizeSuffix}`
         : `${baseName}${numTag}${sizeSuffix}`;
+      btn.title = "図面上のこの区画へ移動";
       btn.addEventListener("click", () => {
-        canvas.setActiveObject(zone);
-        canvas.requestRenderAll();
-        openZoneAction(zone);
+        focusViewportOnZone(zone);
       });
       li.appendChild(btn);
       list.appendChild(li);
@@ -1259,7 +1418,6 @@ function selectZonePreset(preset, startDraw = true) {
   highlightZonePreset();
   updateZoneActiveLabel();
   if (startDraw) setTool("zone");
-  else flashStatus(`「${preset.name}」を選択中`);
 }
 
 function highlightZonePreset() {
@@ -1270,7 +1428,9 @@ function highlightZonePreset() {
 
 function updateZoneActiveLabel() {
   const el = document.getElementById("zone-active-label");
-  if (el && pendingZonePreset) el.textContent = pendingZonePreset.name;
+  if (!el || !pendingZonePreset) return;
+  const name = pendingZonePreset.name || "";
+  el.textContent = name.replace(/エリア$/, "") || name;
 }
 
 function setupZoneModal() {
@@ -1610,38 +1770,83 @@ function cancelZoneDrawing() {
   }
   removeOrphanZonePreviews(canvas);
   setTool("select");
-  flashStatus("区画描画をやめました（右クリック / Esc）");
 }
 
 // ── Canvas interaction ──────────────────────────────
-function onCanvasMouseDown(opt) {
+function resolveDeletableTarget(target) {
+  if (!target) return null;
+  if (
+    target.objectType === "measureLine" ||
+    target.objectType === "sketch" ||
+    target.type === "path"
+  ) {
+    return target;
+  }
+  const group = target.group || (target.type === "group" ? target : null);
+  if (group?.objectType === "measureLine") return group;
+  return null;
+}
+
+function deleteObjectOnRightClick(target) {
+  const obj = resolveDeletableTarget(target);
+  if (!obj || !canvas) return false;
+  canvas.remove(obj);
+  canvas.discardActiveObject();
+  pushHistory();
+  scheduleAutoSave();
+  updateProps();
+  flashStatus("削除");
+  return true;
+}
+
+function handleCanvasRightClick(opt) {
   const e = opt.e;
+  e.preventDefault();
+  e.stopPropagation();
 
-  if (scaleCalibCleanup) return;
+  if (scaleCalibCleanup || scaleCalibPendingPoints) {
+    cancelScaleCalibration();
+    return;
+  }
 
-  if (activeTool === "zone" && e.button === 2) {
-    e.preventDefault();
+  if (activeTool === "zone") {
     cancelZoneDrawing();
     return;
   }
+
+  if (activeTool === "line") {
+    cancelShapeDrawInProgress();
+    disableShapeDraw();
+    setTool("select");
+    return;
+  }
+
+  if (activeTool === "pen") {
+    canvas.isDrawingMode = false;
+    setTool("select");
+    return;
+  }
+
+  if (deleteObjectOnRightClick(opt.target)) return;
+
+  const active = canvas.getActiveObject();
+  if (active && deleteObjectOnRightClick(active)) return;
+}
+
+function onCanvasMouseDown(opt) {
+  const e = opt.e;
+
+  if (e.button === 2) {
+    handleCanvasRightClick(opt);
+    return;
+  }
+
+  if (scaleCalibCleanup) return;
 
   if (activeTool === "line" || activeTool === "pen" || activeTool === "zone") return;
 
   if (e.button === 0 && activeTool === "select" && opt.target?.objectType === "zone") {
     zoneTapStart = { x: e.clientX, y: e.clientY, target: opt.target };
-    return;
-  }
-
-  if (e.button === 2) {
-    const ptr = canvas.getPointer(e);
-    if (opt.target?.objectType === "memo") {
-      editingMemo = opt.target;
-      openMemoModal(ptr, opt.target.memoData, opt.target);
-    } else {
-      memoPendingPos = ptr;
-      editingMemo = null;
-      openMemoModal(ptr);
-    }
     return;
   }
 
@@ -1746,6 +1951,10 @@ async function onCanvasMouseUp(opt) {
 
 async function placeMarkAt(x, y) {
   if (!pendingPart) return;
+  if (!isInsideWorkBoundary({ x, y })) {
+    flashStatus("枠の外");
+    return;
+  }
   await addPartToCanvas(pendingPart, x, y);
   pushHistory();
   scheduleAutoSave();
@@ -1804,10 +2013,10 @@ function showZoneTooltip(e, zone) {
   const sizeLine = formatZoneSizeText(zone._zoneMetrics);
   const sizeHtml = sizeLine
     ? `<span class="zone-tip-size">${esc(sizeLine.replace("\n", " / "))}</span>`
-    : `<span style="color:var(--muted)">未設定 — 下の初期測定を行ってください</span>`;
+    : "";
   zoneTooltip.innerHTML = memo
     ? `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}${esc(memo)}`
-    : `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}<span style="color:var(--muted)">クリックで修正・削除</span>`;
+    : `<strong>${esc(zone.zoneName || "区画")}</strong>${sizeHtml}`;
   zoneTooltip.hidden = false;
   const wrap = canvasWrap.getBoundingClientRect();
   zoneTooltip.style.left = `${e.clientX - wrap.left + 12}px`;
@@ -1963,15 +2172,12 @@ function setupToolbar() {
   document.getElementById("btn-zoom-out").addEventListener("click", () => zoomCanvas(0.83));
   document.getElementById("btn-zoom-fit").addEventListener("click", () => {
     fitDrawing(true);
-    flashStatus("全体表示に戻しました");
+    flashStatus("全体");
   });
 }
 
 function setTool(tool) {
-  if (pendingPlacementZone && tool !== "select") {
-    flashStatus("Enter で固定するか Esc で取消してください");
-    return;
-  }
+  if (pendingPlacementZone && tool !== "select") return;
   activeTool = tool;
   disableShapeDraw();
   document.querySelectorAll("[data-tool]").forEach((b) => {
@@ -2010,7 +2216,6 @@ function setTool(tool) {
       (a, b) => segmentMetrics(a, b, drawingImage, currentMmPerImagePx),
       (metrics) => showDrawDimHud(metrics)
     );
-    flashStatus(`「${pendingZonePreset.name}」— 角クリック → 始点/Enter で形を決定 → ドラッグ → Enter で固定`);
   } else if (tool === "place" && canPlaceParts()) {
     canvas.selection = false;
     canvas.skipTargetFind = false;
@@ -2051,32 +2256,35 @@ let shapeHandler = null;
 
 function enableShapeDraw(kind) {
   disableShapeDraw();
-  let start = null;
-  let shape = null;
-  let liveDimLabel = null;
+  shapeDrawInProgress = { start: null, shape: null, liveDimLabel: null };
 
   shapeHandler = (opt) => {
-    const ptr = snapPoint(canvas.getPointer(opt.e), canvas, opt.e);
+    const raw = canvas.getPointer(opt.e);
+    if (!isInsideWorkBoundary(raw) && opt.e.type === "mousedown") {
+      flashStatus("枠の外");
+      return;
+    }
+    const ptr = snapPoint(raw, canvas, opt.e);
     const t = opt.e.type;
     if (t === "mousedown") {
-      start = ptr;
-      shape = new fabric.Line([ptr.x, ptr.y, ptr.x, ptr.y], {
+      shapeDrawInProgress.start = ptr;
+      shapeDrawInProgress.shape = new fabric.Line([ptr.x, ptr.y, ptr.x, ptr.y], {
         stroke: "#ef4444",
         strokeWidth: 2,
         selectable: false,
         evented: false,
         _skipHistory: true,
       });
-      canvas.add(shape);
-    } else if (t === "mousemove" && start && shape) {
-      shape.set({ x2: ptr.x, y2: ptr.y });
-      const metrics = segmentMetrics(start, ptr, drawingImage, currentMmPerImagePx);
+      canvas.add(shapeDrawInProgress.shape);
+    } else if (t === "mousemove" && shapeDrawInProgress.start && shapeDrawInProgress.shape) {
+      shapeDrawInProgress.shape.set({ x2: ptr.x, y2: ptr.y });
+      const metrics = segmentMetrics(shapeDrawInProgress.start, ptr, drawingImage, currentMmPerImagePx);
       showDrawDimHud(metrics);
       const text = formatEdgeLength(metrics);
-      const mx = (start.x + ptr.x) / 2;
-      const my = (start.y + ptr.y) / 2;
-      if (!liveDimLabel) {
-        liveDimLabel = new fabric.Text(text, {
+      const mx = (shapeDrawInProgress.start.x + ptr.x) / 2;
+      const my = (shapeDrawInProgress.start.y + ptr.y) / 2;
+      if (!shapeDrawInProgress.liveDimLabel) {
+        shapeDrawInProgress.liveDimLabel = new fabric.Text(text, {
           left: mx,
           top: my - 8,
           fontSize: 11,
@@ -2089,19 +2297,25 @@ function enableShapeDraw(kind) {
           evented: false,
           _skipHistory: true,
         });
-        canvas.add(liveDimLabel);
+        canvas.add(shapeDrawInProgress.liveDimLabel);
       } else {
-        liveDimLabel.set({ text, left: mx, top: my - 8 });
+        shapeDrawInProgress.liveDimLabel.set({ text, left: mx, top: my - 8 });
       }
       canvas.requestRenderAll();
-    } else if (t === "mouseup" && start && shape) {
-      const x1 = start.x;
-      const y1 = start.y;
+    } else if (t === "mouseup" && shapeDrawInProgress.start && shapeDrawInProgress.shape) {
+      const x1 = shapeDrawInProgress.start.x;
+      const y1 = shapeDrawInProgress.start.y;
       const x2 = ptr.x;
       const y2 = ptr.y;
-      const metrics = segmentMetrics(start, ptr, drawingImage, currentMmPerImagePx);
-      canvas.remove(shape);
-      if (liveDimLabel) canvas.remove(liveDimLabel);
+      if (!isInsideWorkBoundary({ x: x2, y: y2 })) {
+        cancelShapeDrawInProgress();
+        setTool("select");
+        flashStatus("枠の外");
+        return;
+      }
+      const metrics = segmentMetrics(shapeDrawInProgress.start, ptr, drawingImage, currentMmPerImagePx);
+      canvas.remove(shapeDrawInProgress.shape);
+      if (shapeDrawInProgress.liveDimLabel) canvas.remove(shapeDrawInProgress.liveDimLabel);
       hideDrawDimHud();
 
       const cx = (x1 + x2) / 2;
@@ -2126,13 +2340,15 @@ function enableShapeDraw(kind) {
         originX: "center",
         originY: "center",
         objectType: "measureLine",
+        evented: true,
+        hoverCursor: "pointer",
+        subTargetCheck: false,
+        perPixelTargetFind: true,
       });
       canvas.add(group);
       canvas.setActiveObject(group);
 
-      start = null;
-      shape = null;
-      liveDimLabel = null;
+      shapeDrawInProgress = null;
       pushHistory();
       setTool("select");
     }
@@ -2142,7 +2358,17 @@ function enableShapeDraw(kind) {
   canvas.on("mouse:up", shapeHandler);
 }
 
+function cancelShapeDrawInProgress() {
+  if (!shapeDrawInProgress) return;
+  if (shapeDrawInProgress.shape) canvas.remove(shapeDrawInProgress.shape);
+  if (shapeDrawInProgress.liveDimLabel) canvas.remove(shapeDrawInProgress.liveDimLabel);
+  shapeDrawInProgress = null;
+  hideDrawDimHud();
+  canvas.requestRenderAll();
+}
+
 function disableShapeDraw() {
+  cancelShapeDrawInProgress();
   if (polygonCleanup) {
     polygonCleanup();
     polygonCleanup = null;
@@ -2282,18 +2508,17 @@ function renderZoneDimToggles(zone) {
   const showTsubo = zone.zoneShowTsubo !== false;
   return `
     <div class="zone-dim-toggles">
-      <p class="zone-dim-toggles-title">寸法表示（区画ごと）</p>
       <label class="zone-dim-toggle">
         <input type="checkbox" id="prop-zone-tsubo" ${showTsubo ? "checked" : ""} />
-        坪数
+        坪
       </label>
       <label class="zone-dim-toggle">
         <input type="checkbox" id="prop-zone-edge-lengths" ${showEdges ? "checked" : ""} />
-        各辺の長さ (m)
+        辺
       </label>
       <label class="zone-dim-toggle">
         <input type="checkbox" id="prop-zone-bbox-dims" ${showBBox ? "checked" : ""} />
-        横・縦
+        横縦
       </label>
     </div>
   `;
@@ -2328,16 +2553,12 @@ function updateProps() {
     const metrics = z._zoneMetrics;
     const sizeBlock = metrics
       ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(z)).replace("\n", " · "))}</p>`
-      : `<p class="prop-meta" style="color:var(--muted)">サイズ: 未設定（下の初期測定）</p>`;
+      : "";
     content.innerHTML = `
-      <p class="prop-type">区画 — 配置中</p>
-      <p class="prop-meta">${esc(z.zoneName || "区画")}</p>
       ${sizeBlock}
       ${renderZoneDimToggles(z)}
-      <p class="prop-meta prop-hint">区画の中を<strong>ドラッグ</strong>して位置を調整</p>
-      <p class="prop-meta prop-hint"><strong>Enter</strong> で固定 · <strong>Esc</strong> で取消</p>
-      <button type="button" class="btn btn-primary btn-block" id="props-confirm-zone">Enter で固定</button>
-      <button type="button" class="btn btn-ghost btn-block btn-sm" id="props-cancel-zone">取消 (Esc)</button>
+      <button type="button" class="btn btn-primary btn-block" id="props-confirm-zone">Enter</button>
+      <button type="button" class="btn btn-ghost btn-block btn-sm" id="props-cancel-zone">Esc</button>
     `;
     bindZoneDimToggles(z);
     document.getElementById("props-confirm-zone")?.addEventListener("click", confirmZonePlacement);
@@ -2346,7 +2567,7 @@ function updateProps() {
   }
 
   if (!obj) {
-    content.innerHTML = `<p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>`;
+    content.innerHTML = `<p class="props-empty">—</p>`;
     form.hidden = true;
     if (MACHINES_UI_ENABLED && pendingPart) showMachinePreview(pendingPart);
     return;
@@ -2358,18 +2579,15 @@ function updateProps() {
     const w = Math.round(obj.getScaledWidth());
     const h = Math.round(obj.getScaledHeight());
     content.innerHTML = `
-      <p class="prop-type">図面</p>
-      <p class="prop-meta">表示倍率: <strong>${pct}%</strong></p>
-      <p class="prop-meta">表示サイズ: ${w} × ${h} px</p>
-      <p class="prop-meta" style="color:var(--muted);line-height:1.5">四隅をドラッグで拡大縮小。区画・測定線・㎡表示も自動で連動します。</p>
-      <button class="btn btn-ghost btn-block btn-sm" id="btn-fit-drawing">全体にフィット</button>
+      <p class="prop-meta">${pct}% · ${w}×${h}px</p>
+      <button class="btn btn-ghost btn-block btn-sm" id="btn-fit-drawing">全体</button>
     `;
     document.getElementById("btn-fit-drawing")?.addEventListener("click", () => {
       fitDrawing(true);
       pushHistory();
       scheduleAutoSave();
       updateProps();
-      flashStatus("図面を全体表示に戻しました");
+      flashStatus("全体表示");
     });
     return;
   }
@@ -2397,15 +2615,14 @@ function updateProps() {
     const metrics = obj._zoneMetrics;
     const sizeBlock = metrics
       ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(obj)).replace("\n", " · "))}</p>`
-      : `<p class="prop-meta" style="color:var(--muted)">サイズ: 未設定（下の初期測定）</p>`;
+      : "";
     content.innerHTML = `
-      <p class="prop-type">区画</p>
       <p class="prop-meta">${esc(obj.zoneName || "区画")}</p>
       ${sizeBlock}
       ${renderZoneDimToggles(obj)}
-      ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : `<p class="prop-meta" style="color:var(--muted)">メモなし</p>`}
+      ${memo ? `<p class="prop-meta">${esc(memo)}</p>` : ""}
       <div class="zone-prop-actions">
-        <button class="btn btn-primary btn-sm" id="btn-edit-zone">✎ 修正</button>
+        <button class="btn btn-primary btn-sm" id="btn-edit-zone">✎</button>
         <button class="btn btn-danger btn-sm zone-delete-btn" id="btn-delete-zone" title="削除">🗑</button>
       </div>
     `;
@@ -2474,10 +2691,9 @@ function updateProps() {
     let indexBlock = "";
     if (role === "move-from") {
       indexBlock = `
-        <label class="prop-field mini">インデックス（どのAか）
+        <label class="prop-field mini">文字
           <input type="text" id="prop-mark-index" maxlength="3" placeholder="A" />
         </label>
-        <p class="prop-meta prop-hint">同じ文字の <strong>移動先 →A</strong> と対応づけます</p>
       `;
     } else if (role === "move-to") {
       const opts = getMoveFromIndices();
@@ -2485,18 +2701,15 @@ function updateProps() {
         .map((i) => `<option value="${esc(i)}">${esc(i)}</option>`)
         .join("");
       indexBlock = `
-        <label class="prop-field mini">どこの移動元へ
+        <label class="prop-field mini">移動元
           <select id="prop-mark-link">${options}</select>
         </label>
-        <p class="prop-meta prop-hint">廃止した場所の代わりに<strong>どこへ詰めるか</strong>を指定</p>
       `;
     }
     form.hidden = false;
     content.innerHTML = `
-      <p class="prop-type">リニューアル記号</p>
       <p class="prop-meta"><strong>${esc(roleLabel)}</strong></p>
       ${indexBlock}
-      <p class="prop-meta prop-hint">ドラッグで位置調整 · 削除は下のボタン</p>
     `;
     document.getElementById("prop-label").closest(".prop-field").hidden = true;
     document.querySelectorAll("#props-form .prop-row").forEach((row) => {
@@ -2619,6 +2832,8 @@ function persistCurrent() {
     mmPerImagePx: currentMmPerImagePx,
     scaleCalibrated,
     scaleCalibSummary,
+    scaleHudMinimized,
+    workBoundaryCanvasPoints: getWorkBoundaryPoints(),
     drawingTransform: drawingImage
       ? {
           left: drawingImage.left,
@@ -2711,7 +2926,6 @@ function setupKeyboard() {
       if (e.key === "Escape") {
         e.preventDefault();
         cancelScaleCalibration();
-        flashStatus("初期測定をキャンセルしました");
         return;
       }
     }

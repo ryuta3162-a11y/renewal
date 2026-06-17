@@ -1,4 +1,4 @@
-import { snapPoint, hexToRgba } from "./draw-tools.js";
+import { snapPoint, hexToRgba, isInsideWorkBoundary } from "./draw-tools.js";
 import {
   formatZoneSizeText,
   formatEdgeLength,
@@ -387,6 +387,7 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
     const e = opt.e;
     const raw = canvas.getPointer(e);
     const ptr = snapPoint(raw, canvas, e);
+    if (e.type === "mousedown" && e.button === 0 && !isInsideWorkBoundary(ptr)) return;
     const preset = getPreset();
     const style = getZoneStyle(preset.color, preset.opacity);
 

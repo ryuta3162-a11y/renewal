@@ -14,7 +14,6 @@
         <span class="brand-mark">R</span>
         <div>
           <strong>Renewal Studio</strong>
-          <span class="brand-sub">経堂リニューアル設計</span>
         </div>
       </div>
 
@@ -45,8 +44,8 @@
       </div>
 
       <div class="topbar-group draw-style">
-        <span class="topbar-label mini zone-active-label">区分: <span id="zone-active-label">FWエリア</span></span>
-        <label class="topbar-label mini snap-label"><input type="checkbox" id="snap-grid" checked /> 吸着 <span class="snap-hint">(Shiftで微調整)</span></label>
+        <span class="topbar-label mini zone-active-label"><span id="zone-active-label">FW</span></span>
+        <label class="topbar-label mini snap-label"><input type="checkbox" id="snap-grid" checked /> 吸着</label>
       </div>
 
       <div class="topbar-group">
@@ -62,16 +61,15 @@
     <div class="workspace">
       <aside class="palette-panel zone-sidebar">
         <div class="panel-header-row">
-          <div class="panel-title">区画区分</div>
+          <div class="panel-title">区分</div>
           <div class="hook-toolbar">
-            <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-expand-all" title="すべて展開">展開</button>
-            <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-collapse-all" title="すべて折りたたむ">折畳</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-expand-all" title="展開">＋</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-collapse-all" title="折畳">−</button>
           </div>
         </div>
-        <p class="panel-hint">区分を開く → <strong>区画を描く</strong> → 同じ名称でも何個でも配置可</p>
         <div class="zone-custom-section">
           <div class="panel-header-row">
-            <span class="panel-title sub">自作区分</span>
+            <span class="panel-title sub">自作</span>
             <button type="button" class="btn btn-primary btn-xs" id="btn-add-zone-preset">＋ 追加</button>
           </div>
           <div id="zone-custom-hooks" class="zone-hooks zone-hooks-compact"></div>
@@ -80,12 +78,11 @@
         <div id="zone-hooks" class="zone-hooks"></div>
         <div class="marks-panel" id="marks-panel">
           <div class="panel-header-row">
-            <span class="panel-title sub">リニューアル記号</span>
+            <span class="panel-title sub">記号</span>
           </div>
-          <p class="panel-hint">記号を選び <strong>図面をクリック</strong> · 移動は <strong>A → →A</strong> で対応</p>
           <div id="marks-palette" class="marks-grid"></div>
         </div>
-        <button class="btn btn-danger btn-block" id="btn-clear-zones">区画をすべて消去</button>
+        <button class="btn btn-danger btn-block" id="btn-clear-zones">区画クリア</button>
       </aside>
 
       <div class="canvas-area">
@@ -95,37 +92,29 @@
           <div id="zone-tooltip" class="zone-tooltip" hidden></div>
           <div id="draw-dim-hud" class="draw-dim-hud" hidden>横 — 縦 —</div>
           <div id="zone-place-hud" class="zone-place-hud" hidden>
-            <span class="zone-place-step">① 形を決めた</span>
-            <span class="zone-place-arrow">→</span>
-            <span class="zone-place-step active">② ドラッグで位置調整</span>
-            <span class="zone-place-arrow">→</span>
-            <span class="zone-place-step"><kbd>Enter</kbd> で固定</span>
-            <button type="button" class="btn btn-primary btn-xs zone-place-confirm" id="btn-zone-place-confirm">Enter で固定</button>
-            <button type="button" class="btn btn-ghost btn-xs" id="btn-zone-place-cancel">Esc 取消</button>
+            <button type="button" class="btn btn-primary btn-xs zone-place-confirm" id="btn-zone-place-confirm">Enter</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-zone-place-cancel">Esc</button>
           </div>
           <div id="scale-calib-hud" class="scale-calib-hud">
-            <div class="scale-calib-main">
-              <strong>初期測定</strong>
-              <label class="scale-calib-tsubo">
-                坪
-                <input type="number" id="scale-known-tsubo" placeholder="158.87" min="0.01" step="0.01" inputmode="decimal" />
-              </label>
-              <button type="button" class="btn btn-primary btn-xs" id="btn-area-calibrate">縦横採寸</button>
-              <button type="button" class="btn btn-primary btn-xs" id="btn-scale-apply" hidden>確定</button>
-              <button type="button" class="btn btn-ghost btn-xs" id="btn-scale-cancel" hidden>取消</button>
-              <span class="scale-badge tentative" id="scale-badge">未設定</span>
-            </div>
-            <p class="scale-calib-step" id="scale-calib-step">縦横採寸 → 敷地の角をクリック → 坪を入力 → 確定</p>
-            <p class="scale-calib-status" id="scale-status"></p>
+            <span class="scale-calib-done-line" id="scale-calib-done-line" hidden aria-hidden="true"></span>
+            <span class="scale-calib-done-text" id="scale-calib-done-text" hidden>完了</span>
+            <span class="scale-calib-summary" id="scale-calib-summary" hidden></span>
+            <input type="number" id="scale-known-tsubo" class="scale-calib-input" placeholder="坪" min="0.01" step="0.01" inputmode="decimal" title="坪" />
+            <button type="button" class="btn btn-primary btn-xs" id="btn-area-calibrate">縦横採寸</button>
+            <button type="button" class="btn btn-primary btn-xs" id="btn-scale-apply" hidden>確定</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="btn-scale-cancel" hidden>取消</button>
+            <span class="scale-badge tentative" id="scale-badge">未設定</span>
+            <button type="button" class="btn btn-ghost btn-xs scale-calib-close" id="btn-scale-hud-close" hidden title="閉じる">×</button>
           </div>
+          <button type="button" class="scale-calib-fab" id="scale-calib-fab" hidden title="初期測定">○</button>
         </div>
-        <footer id="status" class="status-bar">準備中… — 変更は自動保存されます</footer>
+        <footer id="status" class="status-bar"></footer>
       </div>
 
       <aside class="props-panel">
         <div class="panel-title">プロパティ</div>
         <div id="props-content">
-          <p class="props-empty">オブジェクトを選択すると<br>詳細を編集できます</p>
+          <p class="props-empty">—</p>
         </div>
         <div id="props-form" hidden>
           <label class="prop-field">名称
@@ -160,24 +149,7 @@
             <span id="prop-rotation-val" class="prop-val">0°</span>
           </label>
         </div>
-        <button class="btn btn-ghost btn-block" id="btn-delete">選択を削除</button>
-        <div class="help-box">
-          <p><strong>大枠づくり</strong></p>
-          <ul>
-            <li>上部<strong>自作区分</strong>で名称・色を登録（ブラウザに保存）</li>
-            <li>標準区分も<strong>同一名称で何個でも</strong>区画を追加可</li>
-            <li>左の<strong>区分フック</strong>を開いて区画を描く</li>
-            <li><strong>⬡区画</strong>：角をクリック → 始点 or <strong>Enter</strong> で形を決定</li>
-            <li>形が決まったら<strong>ドラッグで位置調整</strong> → <strong>Enter</strong> で固定</li>
-            <li><strong>Esc</strong> で配置取消 · <strong>Backspace</strong> で1点戻す（描画中）</li>
-            <li>区画を<strong>クリック</strong> → 修正 or 削除を選択</li>
-            <li><strong>↖ 選択</strong>で図面をクリック → 四隅ドラッグでサイズ変更（区画も連動）</li>
-            <li>描画中・確定後とも<strong>各辺の長さ (m)</strong>を表示</li>
-            <li>区画に<strong>㎡・坪・横縦</strong>が自動表示（下の<strong>初期測定</strong>で坪を入れて縦横採寸）</li>
-            <li>左の<strong>リニューアル記号</strong>で取り壊し✕・制作＋・移動元A/移動先→A</li>
-            <li>フック上部の<strong>展開・折畳</strong>で全体表示</li>
-          </ul>
-        </div>
+        <button class="btn btn-ghost btn-block" id="btn-delete">削除</button>
       </aside>
     </div>
   </div>
@@ -199,7 +171,6 @@
         <label class="prop-field">画像ファイル <span class="req">*</span>
           <input type="file" id="proposal-image" accept="image/*,.pdf" required />
         </label>
-        <p class="modal-note">PNG/JPG/PDFを取り込めます。共有用には proposals/ フォルダへの追加も可能です。</p>
       </div>
       <footer class="modal-footer">
         <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
@@ -230,10 +201,9 @@
         <label class="prop-field">メモ（任意）
           <input type="text" id="custom-preset-desc" placeholder="用途の説明など" />
         </label>
-        <p class="modal-note">保存すると左の一覧に追加され、何度でも区画として使えます。</p>
       </div>
       <footer class="modal-footer">
-        <button type="button" class="btn btn-danger" id="custom-preset-delete" hidden>区分を削除</button>
+        <button type="button" class="btn btn-danger" id="custom-preset-delete" hidden>削除</button>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" data-close>キャンセル</button>
           <button type="submit" class="btn btn-primary">保存</button>

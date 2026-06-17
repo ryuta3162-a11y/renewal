@@ -1,6 +1,21 @@
 import { SNAP_GRID } from "./constants.js";
+import { pointInPolygon } from "./drawing-scale.js";
 
 let snapEnabled = true;
+let workBoundaryPoints = null;
+
+export function setWorkBoundaryPoints(points) {
+  workBoundaryPoints = points?.length >= 3 ? points.map((p) => ({ x: p.x, y: p.y })) : null;
+}
+
+export function getWorkBoundaryPoints() {
+  return workBoundaryPoints;
+}
+
+export function isInsideWorkBoundary(ptr) {
+  if (!workBoundaryPoints?.length) return true;
+  return pointInPolygon(ptr, workBoundaryPoints);
+}
 
 export function setSnapEnabled(on) {
   snapEnabled = on;
