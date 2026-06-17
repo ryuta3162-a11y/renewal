@@ -807,6 +807,7 @@ function snapshotUserObjects() {
 function shouldStartPan(opt) {
   const e = opt.e;
   if (e.button === 2) return false;
+  if (pendingPlacementZone || zoneVertexEditCleanup) return false;
   if (activeTool === "drawing") return false;
   if (e.button === 1) return true;
   if (activeTool === "pan" && e.button === 0) return true;
@@ -964,7 +965,7 @@ function enterZoneVertexEditMode(zone, isNew = true) {
   });
   canvas.isDrawingMode = false;
   canvas.selection = false;
-  canvas.skipTargetFind = true;
+  canvas.skipTargetFind = false;
   canvas.discardActiveObject();
   showPlacementHud(true);
   hideDrawDimHud();
@@ -972,7 +973,7 @@ function enterZoneVertexEditMode(zone, isNew = true) {
   updateDrawingInteractivity();
   updateProps();
   canvas.requestRenderAll();
-  flashStatus("角をドラッグで変形 · Enter で確定");
+  flashStatus("白い丸の角をドラッグで変形 · Enter で確定");
 }
 
 function confirmZoneVertexEdit() {
@@ -989,6 +990,7 @@ function confirmZoneVertexEdit() {
   zone.set({ selectable: true, evented: true, opacity: 1 });
   applyInteractiveControls(zone);
   showPlacementHud(false);
+  canvas.skipTargetFind = false;
   ensureZoneDimensionMarkers(zone);
   refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
   canvas.requestRenderAll();
@@ -1018,6 +1020,7 @@ function cancelZoneVertexEdit() {
   delete zone._skipHistory;
   showPlacementHud(false);
   hideDrawDimHud();
+  canvas.skipTargetFind = false;
   if (isNew) {
     canvas.remove(zone);
     canvas.discardActiveObject();
@@ -1299,11 +1302,18 @@ function attachZonePolygonDraw() {
     () => pendingZonePreset,
     (zone) => {
       polygonCleanup = null;
+      hideDrawDimHud();
+      canvas.skipTargetFind = false;
       if (!zone) {
         setTool("select");
         return;
       }
-      enterZoneVertexEditMode(zone, true);
+      delete zone._skipHistory;
+      applyInteractiveControls(zone);
+      finalizeNewZone(zone);
+      canvas.setActiveObject(zone);
+      setTool("select");
+      updateProps();
     },
     (points) => computeZoneMetricsFromCanvasPoints(points, drawingImage, currentMmPerImagePx),
     (a, b) => segmentMetrics(a, b, drawingImage, currentMmPerImagePx),
@@ -2750,6 +2760,10 @@ function updateCanvasCursor() {
   }
   if (pendingPlacementZone) {
     canvas.setCursor("default");
+    return;
+  }
+  if (zoneVertexEditCleanup) {
+    canvas.setCursor("grab");
     return;
   }
   canvas.setCursor("default");

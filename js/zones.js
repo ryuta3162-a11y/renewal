@@ -181,10 +181,13 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
     }
   );
 
-  const labelW = Math.max(88, Math.min(240, poly.width || 140));
+  const anchor = polygonBBoxCenter(poly);
+  const labelW = Math.max(64, Math.min(130, (poly.width || 140) * 0.75));
   const labelText = buildZoneLabelText(preset.name, metrics);
   const label = new fabric.Textbox(labelText, {
     width: labelW,
+    left: anchor.x,
+    top: anchor.y,
     fontSize: ZONE_LABEL_FONT_SIZE,
     fill: "#0f172a",
     fontWeight: "700",
@@ -214,6 +217,9 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
     zoneOpacity: preset.opacity,
     zonePresetId: preset.id,
     zoneInstanceId: crypto.randomUUID(),
+    zoneShowEdgeLengths: false,
+    zoneShowBBoxDims: false,
+    zoneShowTsubo: true,
     hoverCursor: "pointer",
     subTargetCheck: false,
   });
@@ -247,6 +253,7 @@ export function setZoneCanvasPoints(zone, canvasPoints) {
     poly._setPositionDimensions({});
   }
   if (typeof zone.triggerLayout === "function") zone.triggerLayout();
+  updateZoneLabel(zone, zone._zoneMetrics);
   zone.setCoords();
   zone.dirty = true;
   return zone;
@@ -265,6 +272,13 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
 
   zone.set({ selectable: false, evented: false, opacity: 0.5, hasControls: false, hasBorders: false });
 
+  const suppressed = [];
+  canvas.getObjects().forEach((o) => {
+    if (o._zoneVertexEdit || o === zone) return;
+    suppressed.push({ o, evented: o.evented, selectable: o.selectable });
+    o.set({ evented: false, selectable: false });
+  });
+
   function snapPtr(raw, e) {
     return getSnapPtr ? getSnapPtr(raw, e) : { x: raw.x, y: raw.y };
   }
@@ -278,7 +292,7 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
   }
 
   function rebuildHandles() {
-    const r = 7 / Math.max(canvas.getZoom() || 1, 0.25);
+    const r = Math.max(10, 8 / Math.max(canvas.getZoom() || 1, 0.25));
     handles.forEach((h) => canvas.remove(h));
     handles = canvasPoints.map((pt, i) => {
       const h = new fabric.Circle({
@@ -290,9 +304,14 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
         strokeWidth: 2,
         originX: "center",
         originY: "center",
+        selectable: true,
+        evented: true,
         hasControls: false,
         hasBorders: false,
+        lockRotation: true,
+        lockScaling: true,
         hoverCursor: "grab",
+        moveCursor: "grabbing",
         _zoneVertexEdit: true,
         _vertexIndex: i,
         _skipHistory: true,
@@ -356,6 +375,9 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
     edges.forEach((l) => canvas.remove(l));
     handles = [];
     edges = [];
+    suppressed.forEach(({ o, evented, selectable }) => {
+      o.set({ evented, selectable });
+    });
     if (restoreOriginal) {
       canvasPoints = originalPoints.map((p) => ({ x: p.x, y: p.y }));
       setZoneCanvasPoints(zone, canvasPoints);
@@ -366,8 +388,24 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
   };
 }
 
+function polygonBBoxCenter(poly) {
+  const pts = poly?.points;
+  if (!pts?.length) return { x: 0, y: 0 };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  pts.forEach((p) => {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  });
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+}
+
 export function updateZoneLabel(group, metrics = undefined) {
-  const label = group._objects?.find((o) => o.type === "textbox");
+  const label = group._objects?.find((o) => o.type === "textbox" && !o._zoneDim);
   const poly = group._objects?.[0];
   if (!label || !poly) return;
   const name = group.zoneName || "区画";
@@ -377,10 +415,17 @@ export function updateZoneLabel(group, metrics = undefined) {
     showBBoxDims: group.zoneShowBBoxDims !== false,
     showTsubo: group.zoneShowTsubo !== false,
   };
-  const labelW = Math.max(72, Math.min(200, (poly.width || 120) * (group.scaleX || 1)));
+  const anchor = polygonBBoxCenter(poly);
+  const bboxW = poly.width || 120;
+  const labelW = Math.max(64, Math.min(130, bboxW * 0.75));
   label.set({
     text: buildZoneLabelText(name, m, labelOpts),
     width: labelW,
+    left: anchor.x,
+    top: anchor.y,
+    originX: "center",
+    originY: "center",
+    textAlign: "center",
     fontSize: ZONE_LABEL_FONT_SIZE,
   });
   group.dirty = true;
