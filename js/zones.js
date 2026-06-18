@@ -1,4 +1,4 @@
-import { snapPoint, isInsideWorkBoundary } from "./draw-tools.js";
+import { snapPoint, hexToRgba, isInsideWorkBoundary } from "./draw-tools.js";
 import {
   formatZoneSizeText,
   formatEdgeLength,
@@ -7,6 +7,9 @@ import {
 } from "./drawing-scale.js";
 
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
+
+/** 区画の塗り透明度（固定・UIから変更不可） */
+export const ZONE_FILL_OPACITY = 0.2;
 
 export const ZONE_PRESETS = [
   { id: "fw", name: "FWエリア", color: "#f59e0b", desc: "フリーウェイト・ラック等の大枠" },
@@ -41,7 +44,7 @@ export const ZONE_SERIALIZE_PROPS = [
 
 export function getZoneStyle(color) {
   return {
-    fill: color,
+    fill: hexToRgba(color, ZONE_FILL_OPACITY),
     stroke: color,
     strokeWidth: 2,
     guideStroke: color,
@@ -529,15 +532,16 @@ export function upgradeZoneObject(obj) {
   if (!obj.zoneInstanceId) obj.set("zoneInstanceId", crypto.randomUUID());
   if (obj.objectType === "fillArea") {
     const color = rgbaToHex(obj.fill) || obj.stroke || "#94a3b8";
+    const style = getZoneStyle(color);
     obj.set({
       objectType: "zone",
       zoneName: "区画",
       zoneMemo: "",
       zoneColor: color,
       zonePresetId: "other",
-      fill: color,
-      stroke: color,
-      strokeWidth: 2,
+      fill: style.fill,
+      stroke: style.stroke,
+      strokeWidth: style.strokeWidth,
       opacity: 1,
       hoverCursor: "pointer",
     });
