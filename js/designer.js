@@ -2373,6 +2373,8 @@ function onCanvasMouseDown(opt) {
 
   if (scaleCalibCleanup) return;
 
+  if (zoneVertexEditCleanup) return;
+
   if (activeTool === "zone") return;
 
   if (e.button === 0 && activeTool === "select" && opt.target?.objectType === "zone") {
@@ -2422,6 +2424,8 @@ function onCanvasMouseMove(opt) {
     updateMarqueeDrag(canvas.getPointer(e));
     return;
   }
+
+  if (zoneVertexEditCleanup) return;
 
   if (scaleCalibCleanup) return;
 

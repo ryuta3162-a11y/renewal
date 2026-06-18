@@ -640,7 +640,8 @@ body {
 }
 .zone-place-hud[hidden] { display: none !important; }
 .zone-place-confirm { margin-left: 0.1rem; }
-.canvas-wrap.placing-zone .upper-canvas { cursor: default !important; }
+.canvas-wrap.placing-zone .upper-canvas { cursor: grab !important; }
+.canvas-wrap.zone-vertex-dragging .upper-canvas { cursor: grabbing !important; }
 
 .modal-compact { max-width: 300px; }
 .modal-compact .modal-body { padding: 0.75rem 1rem 1rem; }

@@ -292,26 +292,23 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
   }
 
   function rebuildHandles() {
-    const r = Math.max(10, 8 / Math.max(canvas.getZoom() || 1, 0.25));
+    const r = Math.max(12, 10 / Math.max(canvas.getZoom() || 1, 0.25));
     handles.forEach((h) => canvas.remove(h));
     handles = canvasPoints.map((pt, i) => {
       const h = new fabric.Circle({
         left: pt.x,
         top: pt.y,
         radius: r,
-        fill: "#fff",
+        fill: "#ffffff",
         stroke,
-        strokeWidth: 2,
+        strokeWidth: 3,
         originX: "center",
         originY: "center",
-        selectable: true,
-        evented: true,
+        selectable: false,
+        evented: false,
         hasControls: false,
         hasBorders: false,
-        lockRotation: true,
-        lockScaling: true,
-        hoverCursor: "grab",
-        moveCursor: "grabbing",
+        objectCaching: false,
         _zoneVertexEdit: true,
         _vertexIndex: i,
         _skipHistory: true,
@@ -349,17 +346,58 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
     onPointsChange?.(canvasPoints);
   }
 
-  function onObjectMoving(e) {
-    const h = e.target;
-    if (!h?._zoneVertexEdit) return;
-    const i = h._vertexIndex;
-    const ptr = snapPtr({ x: h.left, y: h.top }, e.e);
-    canvasPoints[i] = { x: ptr.x, y: ptr.y };
-    h.set({ left: ptr.x, top: ptr.y });
-    h.setCoords();
+  let dragIndex = -1;
+  const canvasWrapEl = canvas?.upperCanvasEl?.parentElement;
+
+  function hitHandleIndex(ptr) {
+    const zoom = canvas.getZoom() || 1;
+    const hitPad = Math.max(18, 16 / zoom);
+    for (let i = 0; i < canvasPoints.length; i++) {
+      const p = canvasPoints[i];
+      if (Math.hypot(ptr.x - p.x, ptr.y - p.y) <= hitPad) return i;
+    }
+    return -1;
+  }
+
+  function endDrag() {
+    if (dragIndex < 0) return;
+    dragIndex = -1;
+    canvas.setCursor("grab");
+    canvasWrapEl?.classList.remove("zone-vertex-dragging");
+  }
+
+  function onMouseDown(opt) {
+    if (opt.e.button !== 0) return;
+    const ptr = canvas.getPointer(opt.e);
+    const idx = hitHandleIndex(ptr);
+    if (idx < 0) return;
+    dragIndex = idx;
+    canvas.setCursor("grabbing");
+    canvasWrapEl?.classList.add("zone-vertex-dragging");
+    opt.e.preventDefault();
+    opt.e.stopPropagation();
+  }
+
+  function onMouseMove(opt) {
+    const ptr = canvas.getPointer(opt.e);
+    if (dragIndex < 0) {
+      canvas.setCursor(hitHandleIndex(ptr) >= 0 ? "grab" : "default");
+      return;
+    }
+    const snapped = snapPtr(ptr, opt.e);
+    canvasPoints[dragIndex] = { x: snapped.x, y: snapped.y };
+    const h = handles[dragIndex];
+    if (h) {
+      h.set({ left: snapped.x, top: snapped.y });
+      h.setCoords();
+    }
     applyPoints();
     syncEdges();
     canvas.requestRenderAll();
+  }
+
+  function onMouseUp() {
+    endDrag();
   }
 
   rebuildHandles();
@@ -367,10 +405,17 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
   applyPoints();
   canvas.requestRenderAll();
 
-  canvas.on("object:moving", onObjectMoving);
+  canvas.on("mouse:down", onMouseDown);
+  canvas.on("mouse:move", onMouseMove);
+  canvas.on("mouse:up", onMouseUp);
+  document.addEventListener("mouseup", onMouseUp);
 
   return function cleanup(restoreOriginal = false) {
-    canvas.off("object:moving", onObjectMoving);
+    canvas.off("mouse:down", onMouseDown);
+    canvas.off("mouse:move", onMouseMove);
+    canvas.off("mouse:up", onMouseUp);
+    document.removeEventListener("mouseup", onMouseUp);
+    endDrag();
     handles.forEach((h) => canvas.remove(h));
     edges.forEach((l) => canvas.remove(l));
     handles = [];
