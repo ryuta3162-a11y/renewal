@@ -26,6 +26,9 @@ import {
   removeOrphanZonePreviews,
   purgeCanvasPreviews,
   purgeOrphanZoneDimensions,
+  purgeVertexEditOverlays,
+  normalizeZoneAfterResize,
+  clearZoneRenderCache,
   enableZoneVertexEdit,
   refreshZoneDisplay,
   ensureZoneDimensionMarkers,
@@ -314,10 +317,12 @@ function initCanvas() {
     if (e.target?.type === "activeSelection") {
       e.target.getObjects().forEach((obj) => {
         if (obj.objectType === "zone") {
+          normalizeZoneAfterResize(obj);
           refreshZoneOnCanvas(obj, computeZoneMetricsFor(obj));
         }
         applyInteractiveControls(obj);
       });
+      purgeOrphanZoneDimensions(canvas);
       refreshZoneHooksList();
       pushHistory();
       updateProps();
@@ -333,7 +338,9 @@ function initCanvas() {
       normalizePartAfterResize(e.target);
     }
     if (e.target?.objectType === "zone") {
+      normalizeZoneAfterResize(e.target);
       refreshZoneOnCanvas(e.target, computeZoneMetricsFor(e.target));
+      purgeOrphanZoneDimensions(canvas);
       refreshZoneHooksList();
       if (e.target._zonePendingFix) {
         updateProps();
@@ -369,6 +376,7 @@ function initCanvas() {
       drawingTransformBefore = captureDrawingState(drawingImage);
     }
     if (e.target?.objectType === "zone") {
+      clearZoneRenderCache(e.target);
       refreshZoneOnCanvas(e.target, computeZoneMetricsFor(e.target));
     }
     if (e.target) applyInteractiveControls(e.target);
@@ -1005,8 +1013,11 @@ function confirmZoneVertexEdit() {
   applyInteractiveControls(zone);
   showPlacementHud(false);
   canvas.skipTargetFind = false;
+  normalizeZoneAfterResize(zone);
+  purgeVertexEditOverlays(canvas);
   ensureZoneDimensionMarkers(zone);
   refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+  purgeOrphanZoneDimensions(canvas);
   canvas.requestRenderAll();
   if (isNew) {
     finalizeNewZone(zone);

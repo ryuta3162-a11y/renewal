@@ -242,6 +242,7 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
     top: c.y,
     originX: "center",
     originY: "center",
+    objectCaching: false,
     objectType: "zone",
     zoneName: preset.name,
     zoneMemo: memo || "",
@@ -286,8 +287,51 @@ export function setZoneCanvasPoints(zone, canvasPoints) {
   if (typeof zone.triggerLayout === "function") zone.triggerLayout();
   updateZoneLabel(zone, zone._zoneMetrics);
   zone.setCoords();
-  zone.dirty = true;
+  clearZoneRenderCache(zone);
   return zone;
+}
+
+/** 変形・リサイズ後のキャッシュ残骸を防ぐ */
+export function clearZoneRenderCache(zone) {
+  if (!zone) return;
+  zone.dirty = true;
+  if (typeof zone._clearCache === "function") zone._clearCache();
+  zone._objects?.forEach((o) => {
+    o.dirty = true;
+    if (typeof o._clearCache === "function") o._clearCache();
+  });
+}
+
+/** ハンドル変形をポリゴン頂点へ焼き込み、scale/angle をリセット */
+export function normalizeZoneAfterResize(zone) {
+  if (zone?.objectType !== "zone" || zone.type !== "group") return zone;
+  const sx = zone.scaleX ?? 1;
+  const sy = zone.scaleY ?? 1;
+  const needsBake =
+    Math.abs(sx - 1) > 0.0001 ||
+    Math.abs(sy - 1) > 0.0001 ||
+    Math.abs(zone.skewX || 0) > 0.0001 ||
+    Math.abs(zone.skewY || 0) > 0.0001 ||
+    Math.abs(zone.angle || 0) > 0.0001;
+  if (needsBake) {
+    const pts = getZoneCanvasPoints(zone);
+    if (pts.length >= 3) setZoneCanvasPoints(zone, pts.map((p) => ({ x: p.x, y: p.y })));
+  }
+  clearZoneRenderCache(zone);
+  return zone;
+}
+
+/** 頂点編集のガイド線・ハンドルが残った場合に除去 */
+export function purgeVertexEditOverlays(canvas) {
+  if (!canvas) return;
+  let removed = false;
+  canvas.getObjects().forEach((o) => {
+    if (o._zoneVertexEdit) {
+      canvas.remove(o);
+      removed = true;
+    }
+  });
+  if (removed) canvas.requestRenderAll();
 }
 
 /**
@@ -471,6 +515,8 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
         strokeWidth: polyEditBefore.strokeWidth ?? 2,
       });
     }
+    clearZoneRenderCache(zone);
+    purgeVertexEditOverlays(canvas);
     canvas.requestRenderAll();
   };
 }
@@ -555,7 +601,8 @@ export function upgradeZoneObject(obj) {
   }
   const solidColor = resolveSolidZoneColor(obj);
   updateZoneColors(obj, solidColor);
-  obj.set({ opacity: 1 });
+  obj.set({ opacity: 1, objectCaching: false });
+  obj._objects?.forEach((o) => o.set({ objectCaching: false }));
   delete obj.zoneOpacity;
   if (!obj._objects?.some((o) => o.type === "textbox" && !o._zoneDim)) {
     updateZoneLabel(obj);
