@@ -45,7 +45,7 @@ import {
   enrichPartWithImage,
   getManifestHint,
 } from "./machine-images.js";
-import { pdfToDataUrl } from "./pdf-loader.js";
+import { pdfToDataUrl, pdfToStackedDataUrl } from "./pdf-loader.js";
 import {
   canvasToImagePx,
   mmPerImagePxFromAreaPx,
@@ -109,6 +109,8 @@ let currentSheets = DRAWINGS;
 let currentDrawingId = null;
 let currentPage = 1;
 let totalPages = 1;
+/** 1つのPDF内のページ数（縦並び表示時は totalPages は 1 のまま） */
+let drawingPdfPageCount = 0;
 let polygonCleanup = null;
 let activeTool = "zone";
 let pendingZonePreset = ZONE_PRESETS[0];
@@ -442,6 +444,15 @@ function initCanvas() {
 
   canvas.on("mouse:wheel", (opt) => {
     const e = opt.e;
+    if (drawingPdfPageCount > 1 && !e.ctrlKey && !e.metaKey) {
+      const vpt = canvas.viewportTransform.slice();
+      vpt[5] -= e.deltaY;
+      canvas.setViewportTransform(vpt);
+      scheduleAutoSave();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     let z = canvas.getZoom() * 0.999 ** e.deltaY;
     z = Math.min(Math.max(z, 0.15), 10);
     canvas.zoomToPoint({ x: e.offsetX, y: e.offsetY }, z);
@@ -626,16 +637,29 @@ async function switchDrawing(id) {
 async function loadSheetBackground(sheet) {
   if (isImageSheet(sheet)) {
     totalPages = 1;
+    drawingPdfPageCount = 0;
     updatePageUI();
     const src = sheet.file.startsWith("data:") ? sheet.file : sheet.file;
     await loadDrawingImage(src);
     return;
   }
-  const pdf = await pdfToDataUrl(getSheetPdfFile(sheet), 1, 2);
-  if (!sheet.pages?.length) totalPages = pdf.numPages;
-  else totalPages = sheet.pages.length;
+
+  if (sheet.pages?.length) {
+    drawingPdfPageCount = 0;
+    totalPages = sheet.pages.length;
+    updatePageUI();
+    const pdf = await pdfToDataUrl(getSheetPdfFile(sheet, currentPage), 1, 2);
+    await loadDrawingImage(pdf.dataUrl);
+    return;
+  }
+
+  setStatus("PDFを読み込み中…");
+  const stacked = await pdfToStackedDataUrl(getSheetPdfFile(sheet), 2);
+  drawingPdfPageCount = stacked.numPages;
+  totalPages = 1;
+  currentPage = 1;
   updatePageUI();
-  await loadDrawingImage(pdf.dataUrl);
+  await loadDrawingImage(stacked.dataUrl);
 }
 
 async function loadDrawing(id) {
@@ -679,7 +703,9 @@ async function loadDrawing(id) {
       throw new Error("図面画像の生成に失敗しました");
     }
     const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
-    setStatus(`${proj} / ${sheet.name} — ページ ${currentPage}`);
+    const pageNote =
+      drawingPdfPageCount > 1 ? `（${drawingPdfPageCount}ページ・下へ移動で閲覧）` : ` — ページ ${currentPage}`;
+    setStatus(`${proj} / ${sheet.name}${pageNote}`);
     updateSheetActionButtons();
   } catch (err) {
     isRestoringHistory = false;
@@ -728,16 +754,24 @@ function fitDrawing(resetView = false) {
   const pad = 32;
   const iw = drawingImage.width;
   const ih = drawingImage.height;
-  const scale = Math.min(
-    (canvas.getWidth() - pad * 2) / iw,
-    (canvas.getHeight() - pad * 2) / ih
-  );
+  let scale;
+  let top;
+  if (drawingPdfPageCount > 1) {
+    scale = (canvas.getWidth() - pad * 2) / iw;
+    top = pad;
+  } else {
+    scale = Math.min(
+      (canvas.getWidth() - pad * 2) / iw,
+      (canvas.getHeight() - pad * 2) / ih
+    );
+    top = (canvas.getHeight() - ih * scale) / 2;
+  }
   if (!Number.isFinite(scale) || scale <= 0) return;
   drawingImage.set({
     scaleX: scale,
     scaleY: scale,
     left: (canvas.getWidth() - iw * scale) / 2,
-    top: (canvas.getHeight() - ih * scale) / 2,
+    top,
   });
   drawingImage.setCoords();
   const after = captureDrawingState(drawingImage);
@@ -855,9 +889,22 @@ function startPan(e) {
 }
 
 function updatePageUI() {
-  document.getElementById("page-info").textContent = `${currentPage} / ${totalPages}`;
-  document.getElementById("btn-prev-page").disabled = currentPage <= 1;
-  document.getElementById("btn-next-page").disabled = currentPage >= totalPages;
+  const info = document.getElementById("page-info");
+  const prevBtn = document.getElementById("btn-prev-page");
+  const nextBtn = document.getElementById("btn-next-page");
+  if (drawingPdfPageCount > 1) {
+    info.textContent = `${drawingPdfPageCount}ページ`;
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+    prevBtn.title = "縦スクロール（移動ツールで上下）";
+    nextBtn.title = "";
+    return;
+  }
+  prevBtn.title = "";
+  nextBtn.title = "";
+  info.textContent = `${currentPage} / ${totalPages}`;
+  prevBtn.disabled = currentPage <= 1;
+  nextBtn.disabled = currentPage >= totalPages;
 }
 
 document.getElementById("btn-prev-page").addEventListener("click", async () => {
@@ -889,9 +936,12 @@ async function reloadPage() {
   drawingImage = null;
   if (isImageSheet(sheet)) {
     await loadDrawingImage(sheet.file);
-  } else {
-    const pdf = await pdfToDataUrl(getSheetPdfFile(sheet), 1, 2);
+  } else if (sheet.pages?.length) {
+    const pdf = await pdfToDataUrl(getSheetPdfFile(sheet, currentPage), 1, 2);
     await loadDrawingImage(pdf.dataUrl);
+  } else {
+    const stacked = await pdfToStackedDataUrl(getSheetPdfFile(sheet), 2);
+    await loadDrawingImage(stacked.dataUrl);
   }
   const saved = loadDesign(pageKey());
   scaleCalibrated = !!saved?.scaleCalibrated;
