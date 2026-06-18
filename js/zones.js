@@ -1,4 +1,4 @@
-import { snapPoint, hexToRgba, isInsideWorkBoundary } from "./draw-tools.js";
+import { snapPoint, isInsideWorkBoundary } from "./draw-tools.js";
 import {
   formatZoneSizeText,
   formatEdgeLength,
@@ -9,13 +9,18 @@ import {
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
 
 export const ZONE_PRESETS = [
-  { id: "fw", name: "FWエリア", color: "#f59e0b", opacity: 0.3, desc: "フリーウェイト・ラック等の大枠" },
-  { id: "studio", name: "スタジオエリア", color: "#8b5cf6", opacity: 0.3, desc: "スタジオ・レッスン系の区画" },
-  { id: "cardio", name: "有酸素エリア", color: "#ec4899", opacity: 0.28, desc: "ランニング・バイク等のゾーン" },
-  { id: "stretch", name: "ストレッチエリア", color: "#14b8a6", opacity: 0.28, desc: "ストレッチ・ヨガ系スペース" },
-  { id: "entrance", name: "エントランス", color: "#3b82f6", opacity: 0.25, desc: "入口・受付・動線の起点" },
-  { id: "locker", name: "更衣室・水回り", color: "#06b6d4", opacity: 0.28, desc: "更衣室・シャワー・トイレ周辺" },
-  { id: "other", name: "その他区画", color: "#94a3b8", opacity: 0.25, desc: "上記以外・仮置き・検討中" },
+  { id: "fw", name: "FWエリア", color: "#f59e0b", desc: "フリーウェイト・ラック等の大枠" },
+  { id: "studio", name: "スタジオエリア", color: "#8b5cf6", desc: "スタジオ・レッスン系の区画" },
+  { id: "cardio", name: "有酸素エリア", color: "#ec4899", desc: "ランニング・バイク等のゾーン" },
+  { id: "stretch", name: "ストレッチエリア", color: "#14b8a6", desc: "ストレッチ・ヨガ系スペース" },
+  { id: "circuit", name: "サーキットエリア", color: "#22c55e", desc: "サーキット・トレーニング動線" },
+  { id: "machine", name: "マシンエリア", color: "#0ea5e9", desc: "マシン配置ゾーン" },
+  { id: "women", name: "女性専用", color: "#d946ef", desc: "女性専用フロア・区画" },
+  { id: "entrance", name: "エントランス", color: "#3b82f6", desc: "入口・受付・動線の起点" },
+  { id: "locker", name: "更衣室・水回り", color: "#06b6d4", desc: "更衣室・シャワー・トイレ周辺" },
+  { id: "staff", name: "スタッフ", color: "#84cc16", desc: "スタッフ専用・事務スペース" },
+  { id: "storage", name: "物置・バック", color: "#78716c", desc: "倉庫・バックヤード" },
+  { id: "other", name: "その他区画", color: "#94a3b8", desc: "上記以外・仮置き・検討中" },
 ];
 
 export function getAllZonePresets() {
@@ -27,7 +32,6 @@ export const ZONE_SERIALIZE_PROPS = [
   "zoneName",
   "zoneMemo",
   "zoneColor",
-  "zoneOpacity",
   "zonePresetId",
   "zoneInstanceId",
   "zoneShowEdgeLengths",
@@ -35,13 +39,38 @@ export const ZONE_SERIALIZE_PROPS = [
   "zoneShowTsubo",
 ];
 
-export function getZoneStyle(color, opacity) {
+export function getZoneStyle(color) {
   return {
-    fill: hexToRgba(color, opacity),
+    fill: color,
     stroke: color,
     strokeWidth: 2,
     guideStroke: color,
   };
+}
+
+function rgbaToHex(str) {
+  if (typeof str !== "string") return null;
+  if (str.startsWith("#")) return str;
+  const m = str.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (!m) return null;
+  return (
+    "#" +
+    [m[1], m[2], m[3]]
+      .map((n) => Number(n).toString(16).padStart(2, "0"))
+      .join("")
+  );
+}
+
+export function resolveSolidZoneColor(group) {
+  if (group.zoneColor?.startsWith?.("#")) return group.zoneColor;
+  const poly = group._objects?.[0];
+  const fromFill = rgbaToHex(poly?.fill);
+  if (fromFill) return fromFill;
+  if (group.zonePresetId) {
+    const preset = getAllZonePresets().find((p) => p.id === group.zonePresetId);
+    if (preset?.color) return preset.color;
+  }
+  return "#94a3b8";
 }
 
 function polygonCentroid(points) {
@@ -167,7 +196,7 @@ function buildZoneLabelText(name, metrics, opts = {}) {
 const ZONE_LABEL_FONT_SIZE = 8;
 
 export function createZoneGroup(points, preset, memo = "", metrics = null) {
-  const style = getZoneStyle(preset.color, preset.opacity);
+  const style = getZoneStyle(preset.color);
   const c = polygonCentroid(points);
 
   const poly = new fabric.Polygon(
@@ -196,7 +225,7 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
     originY: "center",
     splitByGrapheme: true,
     lineHeight: 1.1,
-    backgroundColor: "rgba(255,255,255,0.75)",
+    backgroundColor: "#ffffff",
     objectCaching: false,
   });
 
@@ -214,7 +243,6 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
     zoneName: preset.name,
     zoneMemo: memo || "",
     zoneColor: preset.color,
-    zoneOpacity: preset.opacity,
     zonePresetId: preset.id,
     zoneInstanceId: crypto.randomUUID(),
     zoneShowEdgeLengths: false,
@@ -269,8 +297,13 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
   const originalPoints = canvasPoints.map((p) => ({ x: p.x, y: p.y }));
   let handles = [];
   let edges = [];
+  const poly = zone._objects?.[0];
+  const polyEditBefore = poly
+    ? { strokeDashArray: poly.strokeDashArray, strokeWidth: poly.strokeWidth }
+    : null;
 
-  zone.set({ selectable: false, evented: false, opacity: 0.5, hasControls: false, hasBorders: false });
+  zone.set({ selectable: false, evented: false, opacity: 1, hasControls: false, hasBorders: false });
+  poly?.set({ strokeDashArray: [8, 4], strokeWidth: 3 });
 
   const suppressed = [];
   canvas.getObjects().forEach((o) => {
@@ -429,6 +462,12 @@ export function enableZoneVertexEdit(canvas, zone, opts = {}) {
       onPointsChange?.(canvasPoints);
     }
     zone.set({ opacity: 1 });
+    if (poly && polyEditBefore) {
+      poly.set({
+        strokeDashArray: polyEditBefore.strokeDashArray,
+        strokeWidth: polyEditBefore.strokeWidth ?? 2,
+      });
+    }
     canvas.requestRenderAll();
   };
 }
@@ -476,29 +515,33 @@ export function updateZoneLabel(group, metrics = undefined) {
   group.dirty = true;
 }
 
-export function updateZoneColors(group, color, opacity) {
+export function updateZoneColors(group, color) {
   const poly = group._objects?.[0];
   if (!poly) return;
-  const style = getZoneStyle(color, opacity ?? group.zoneOpacity ?? 0.3);
+  const style = getZoneStyle(color);
   poly.set({ fill: style.fill, stroke: style.stroke, strokeWidth: style.strokeWidth });
-  group.set({ zoneColor: color, zoneOpacity: opacity ?? group.zoneOpacity });
+  group.set({ zoneColor: color, opacity: 1 });
+  delete group.zoneOpacity;
   group.dirty = true;
 }
 
 export function upgradeZoneObject(obj) {
   if (!obj.zoneInstanceId) obj.set("zoneInstanceId", crypto.randomUUID());
   if (obj.objectType === "fillArea") {
+    const color = rgbaToHex(obj.fill) || obj.stroke || "#94a3b8";
     obj.set({
       objectType: "zone",
       zoneName: "区画",
       zoneMemo: "",
-      zoneColor: "#94a3b8",
-      zoneOpacity: 0.25,
+      zoneColor: color,
       zonePresetId: "other",
-      stroke: obj.stroke || "#94a3b8",
+      fill: color,
+      stroke: color,
       strokeWidth: 2,
+      opacity: 1,
       hoverCursor: "pointer",
     });
+    delete obj.zoneOpacity;
     return obj;
   }
   if (obj.objectType !== "zone" || obj.type !== "group") return obj;
@@ -506,6 +549,10 @@ export function upgradeZoneObject(obj) {
   if (poly) {
     poly.set({ strokeLineJoin: "miter", strokeWidth: poly.strokeWidth || 2 });
   }
+  const solidColor = resolveSolidZoneColor(obj);
+  updateZoneColors(obj, solidColor);
+  obj.set({ opacity: 1 });
+  delete obj.zoneOpacity;
   if (!obj._objects?.some((o) => o.type === "textbox" && !o._zoneDim)) {
     updateZoneLabel(obj);
   }
@@ -553,7 +600,7 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
   function highlightCloseTarget() {
     if (vertexDots.length && points.length >= 3) {
       const preset = getPreset();
-      const style = getZoneStyle(preset.color, preset.opacity);
+      const style = getZoneStyle(preset.color);
       vertexDots[0].set({
         width: 16,
         height: 16,
@@ -567,7 +614,7 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
   function resetCloseTarget() {
     if (vertexDots.length) {
       const preset = getPreset();
-      const style = getZoneStyle(preset.color, preset.opacity);
+      const style = getZoneStyle(preset.color);
       vertexDots[0].set({
         width: 8,
         height: 8,
@@ -606,7 +653,7 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
     const ptr = snapPoint(raw, canvas, e);
     if (e.type === "mousedown" && e.button === 0 && !isInsideWorkBoundary(ptr)) return;
     const preset = getPreset();
-    const style = getZoneStyle(preset.color, preset.opacity);
+    const style = getZoneStyle(preset.color);
 
     if (e.type === "mousemove" && points.length) {
       if (rubberLine) canvas.remove(rubberLine);
@@ -632,7 +679,6 @@ export function enableZoneDraw(canvas, getPreset, onDone, getMetrics, getSegment
             stroke: style.stroke,
             strokeWidth: 2,
             strokeLineJoin: "miter",
-            opacity: 0.85,
             selectable: false,
             evented: false,
             _zonePreview: true,

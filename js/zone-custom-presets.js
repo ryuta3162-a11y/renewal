@@ -5,7 +5,8 @@ const KEY = STORAGE_PREFIX + "custom-zone-presets";
 export function loadCustomZonePresets() {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : [];
+    const list = raw ? JSON.parse(raw) : [];
+    return list.map(({ opacity, ...preset }) => preset);
   } catch {
     return [];
   }
@@ -15,13 +16,12 @@ export function saveCustomZonePresets(list) {
   localStorage.setItem(KEY, JSON.stringify(list));
 }
 
-export function addCustomZonePreset({ name, color, opacity, desc }) {
+export function addCustomZonePreset({ name, color, desc }) {
   const list = loadCustomZonePresets();
   const entry = {
     id: "custom-" + crypto.randomUUID(),
     name: name.trim(),
     color: color || "#a78bfa",
-    opacity: opacity ?? 0.3,
     desc: desc?.trim() || "自作の区画区分",
     isCustom: true,
   };

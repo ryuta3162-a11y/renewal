@@ -16,7 +16,6 @@ const SERIALIZE_PROPS = [
   "zoneName",
   "zoneMemo",
   "zoneColor",
-  "zoneOpacity",
   "zonePresetId",
   "zoneInstanceId",
   "zoneShowEdgeLengths",

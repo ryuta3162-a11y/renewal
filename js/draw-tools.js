@@ -45,9 +45,9 @@ export function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-export function getFillStyle(color, opacity) {
+export function getFillStyle(color) {
   return {
-    fill: hexToRgba(color, opacity),
+    fill: color,
     stroke: null,
     strokeWidth: 0,
     guideStroke: color,
@@ -86,7 +86,6 @@ export function enablePolygonFill(canvas, getStyle, onDone) {
             fill: style.fill,
             stroke: null,
             strokeWidth: 0,
-            opacity: 0.85,
             selectable: false,
             evented: false,
           }

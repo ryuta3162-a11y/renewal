@@ -1691,7 +1691,6 @@ function setupCustomPresetModal() {
     const data = {
       name,
       color: document.getElementById("custom-preset-color").value,
-      opacity: Number(document.getElementById("custom-preset-opacity").value),
       desc: document.getElementById("custom-preset-desc").value.trim() || "自作の区画区分",
     };
 
@@ -1729,7 +1728,6 @@ function openCustomPresetModal(preset) {
     : "自作区分を追加";
   document.getElementById("custom-preset-name").value = preset?.name ?? "";
   document.getElementById("custom-preset-color").value = preset?.color ?? "#a78bfa";
-  document.getElementById("custom-preset-opacity").value = preset?.opacity ?? 0.3;
   document.getElementById("custom-preset-desc").value =
     preset?.desc && preset.desc !== "自作の区画区分" ? preset.desc : "";
   document.getElementById("custom-preset-delete").hidden = !preset;
@@ -2931,7 +2929,7 @@ function applyPropToSelection(field) {
       obj.set("zoneMemo", document.getElementById("prop-zone-memo").value);
     }
     if (field === "fill") {
-      updateZoneColors(obj, document.getElementById("prop-fill").value, obj.zoneOpacity);
+      updateZoneColors(obj, document.getElementById("prop-fill").value);
     }
     canvas.requestRenderAll();
     scheduleAutoSave();
