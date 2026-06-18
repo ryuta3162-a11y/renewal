@@ -56,6 +56,14 @@ export function sheetHasSavedDesign(projectId, sheetId) {
   });
 }
 
+/** 図面の全ページ保存データを削除 */
+export function deleteSheetDesign(projectId, sheetId) {
+  const prefix = `${projectId}-${sheetId}-p`;
+  listSavedDesigns()
+    .filter((k) => k.startsWith(prefix))
+    .forEach((k) => localStorage.removeItem(STORAGE_PREFIX + k));
+}
+
 /** 図面の全ページデータを別シートへ複製（localStorage） */
 export function copySheetDesign(srcProjectId, srcSheetId, destProjectId, destSheetId) {
   const prefix = `${srcProjectId}-${srcSheetId}-p`;

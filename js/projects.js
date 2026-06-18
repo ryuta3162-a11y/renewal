@@ -1,6 +1,7 @@
 import { DRAWINGS, MASTER_PROJECT_ID, STORAGE_PREFIX } from "./constants.js";
 
 const IMPORTED_KEY = STORAGE_PREFIX + "imported-proposals";
+const CUSTOM_SHEETS_KEY = STORAGE_PREFIX + "custom-sheets";
 let sharedManifest = null;
 
 export async function loadSharedProposals() {
@@ -38,7 +39,111 @@ function mapDrawingToSheet(d) {
     scaleHints: d.scaleHints,
     planAreaM2: d.planAreaM2,
     planAreaTsubo: d.planAreaTsubo,
+    isCustom: !!d.isCustom,
+    nameRoot: d.nameRoot,
+    insertAfterId: d.insertAfterId,
   };
+}
+
+export function loadCustomSheetsMap() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_SHEETS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCustomSheetsMap(map) {
+  localStorage.setItem(CUSTOM_SHEETS_KEY, JSON.stringify(map));
+}
+
+export function getCustomSheetsForProject(projectId) {
+  return loadCustomSheetsMap()[projectId] || [];
+}
+
+export function isCustomSheet(sheet) {
+  return !!sheet?.isCustom;
+}
+
+function mergeSheetsWithCustom(baseSheets, customSheets) {
+  if (!customSheets.length) return baseSheets;
+  const result = baseSheets.map((s) => ({ ...s }));
+  const pending = customSheets.map((s) => mapDrawingToSheet(s));
+  while (pending.length) {
+    let inserted = false;
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const custom = pending[i];
+      let insertIdx = -1;
+      for (let j = result.length - 1; j >= 0; j--) {
+        if (result[j].id === custom.insertAfterId) {
+          insertIdx = j;
+          break;
+        }
+      }
+      if (insertIdx >= 0) {
+        result.splice(insertIdx + 1, 0, custom);
+        pending.splice(i, 1);
+        inserted = true;
+      }
+    }
+    if (!inserted) {
+      result.push(...pending);
+      break;
+    }
+  }
+  return result;
+}
+
+function nextDuplicateName(nameRoot, existingNames) {
+  const taken = new Set(existingNames);
+  let n = 2;
+  while (taken.has(`${nameRoot}-${n}`)) n++;
+  return `${nameRoot}-${n}`;
+}
+
+/** 図面を複製してリストに追加（同一PDF・区画データ付き） */
+export function duplicateProjectSheet(projectId, sourceSheetId) {
+  const sheets = getProjectSheets(projectId);
+  const source = sheets.find((s) => s.id === sourceSheetId);
+  if (!source) return null;
+
+  const nameRoot = source.nameRoot || source.name;
+  const newName = nextDuplicateName(
+    nameRoot,
+    sheets.map((s) => s.name)
+  );
+  const newSheet = mapDrawingToSheet({
+    id: "custom-" + crypto.randomUUID(),
+    name: newName,
+    file: source.file,
+    kind: source.kind,
+    pages: source.pages,
+    planWidthMm: source.planWidthMm,
+    scaleHints: source.scaleHints,
+    planAreaM2: source.planAreaM2,
+    planAreaTsubo: source.planAreaTsubo,
+    isCustom: true,
+    nameRoot,
+    insertAfterId: sourceSheetId,
+  });
+
+  const map = loadCustomSheetsMap();
+  if (!map[projectId]) map[projectId] = [];
+  map[projectId].push(newSheet);
+  saveCustomSheetsMap(map);
+  return newSheet;
+}
+
+/** 複製図面を削除（組み込み図面は不可） */
+export function deleteProjectSheet(projectId, sheetId) {
+  const map = loadCustomSheetsMap();
+  const list = map[projectId];
+  if (!list?.some((s) => s.id === sheetId)) return false;
+  map[projectId] = list.filter((s) => s.id !== sheetId);
+  if (!map[projectId].length) delete map[projectId];
+  saveCustomSheetsMap(map);
+  return true;
 }
 
 export function getMasterProject() {
@@ -100,7 +205,8 @@ export function getCachedProjects() {
 
 export function getProjectSheets(projectId) {
   const p = getAllProjectsSync().find((x) => x.id === projectId);
-  return p?.sheets ?? DRAWINGS;
+  const base = (p?.sheets ?? DRAWINGS).map((s) => mapDrawingToSheet(s));
+  return mergeSheetsWithCustom(base, getCustomSheetsForProject(projectId));
 }
 
 export function addImportedProposal({ name, author, sheets }) {

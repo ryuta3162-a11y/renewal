@@ -4,6 +4,9 @@ import {
   setCachedProjects,
   getCachedProjects,
   getProjectSheets,
+  duplicateProjectSheet,
+  deleteProjectSheet,
+  isCustomSheet,
 } from "./projects.js";
 import {
   snapPoint,
@@ -67,6 +70,7 @@ import {
   loadDesign,
   designPageKey,
   copySheetDesign,
+  deleteSheetDesign,
   sheetHasSavedDesign,
   designHasContent,
 } from "./storage.js";
@@ -150,6 +154,7 @@ async function init() {
   setupToolbar();
   setupModals();
   setupSheetCopyModal();
+  setupSheetDuplicateDelete();
   setupPropsForm();
   setupDrawStyle();
   setupZoneUI();
@@ -562,6 +567,14 @@ function rebuildSheetSelect() {
     sel.appendChild(opt);
   });
   sel.onchange = () => switchDrawing(sel.value);
+  updateSheetActionButtons();
+}
+
+function updateSheetActionButtons() {
+  const delBtn = document.getElementById("btn-sheet-delete");
+  if (!delBtn) return;
+  const sheet = currentDrawingId ? getCurrentSheet(currentDrawingId) : null;
+  delBtn.disabled = !sheet || !isCustomSheet(sheet);
 }
 
 function cancelPendingAutoSave() {
@@ -659,6 +672,7 @@ async function loadDrawing(id) {
     }
     const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
     setStatus(`${proj} / ${sheet.name} — ページ ${currentPage}`);
+    updateSheetActionButtons();
   } catch (err) {
     isRestoringHistory = false;
     cancelPendingAutoSave();
@@ -1934,6 +1948,93 @@ function populateCopySheetSelect(projectId, sel, excludeSheetId) {
 function getSheetLabel(projectId, sheetId) {
   const sheet = getProjectSheets(projectId).find((s) => s.id === sheetId);
   return sheet?.name || sheetId;
+}
+
+function ensureSheetDesignPersisted(projectId, sheetId) {
+  if (projectId !== currentProjectId || sheetId !== currentDrawingId) return;
+  persistCurrent();
+  if (sheetHasSavedDesign(projectId, sheetId)) return;
+  const pageData = {
+    objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
+    scaleCalibrated,
+    mmPerImagePx: currentMmPerImagePx,
+    workBoundaryCanvasPoints: getWorkBoundaryPoints(),
+  };
+  if (!designHasContent(pageData)) return;
+  saveDesign(
+    designPageKey(projectId, sheetId, currentPage),
+    JSON.parse(
+      JSON.stringify({
+        objects: pageData.objects,
+        viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
+        mmPerImagePx: pageData.mmPerImagePx,
+        scaleCalibrated: pageData.scaleCalibrated,
+        scaleCalibSummary,
+        scaleHudMinimized,
+        workBoundaryCanvasPoints: pageData.workBoundaryCanvasPoints,
+        drawingTransform: drawingImage
+          ? {
+              left: drawingImage.left,
+              top: drawingImage.top,
+              scaleX: drawingImage.scaleX,
+              scaleY: drawingImage.scaleY,
+            }
+          : null,
+      })
+    )
+  );
+}
+
+function setupSheetDuplicateDelete() {
+  document.getElementById("btn-sheet-duplicate")?.addEventListener("click", async () => {
+    if (!currentDrawingId) return;
+    if (!discardPendingPlacementIfNeeded("図面を複製する")) return;
+
+    const srcId = currentDrawingId;
+    const srcLabel = getCurrentSheet(srcId)?.name || srcId;
+    ensureSheetDesignPersisted(currentProjectId, srcId);
+
+    const newSheet = duplicateProjectSheet(currentProjectId, srcId);
+    if (!newSheet) {
+      flashStatus("図面を複製できませんでした");
+      return;
+    }
+
+    copySheetDesign(currentProjectId, srcId, currentProjectId, newSheet.id);
+    rebuildSheetSelect();
+    document.getElementById("drawing-select").value = newSheet.id;
+    await switchDrawing(newSheet.id);
+    flashStatus(`「${srcLabel}」を複製 →「${newSheet.name}」`);
+  });
+
+  document.getElementById("btn-sheet-delete")?.addEventListener("click", async () => {
+    if (!currentDrawingId) return;
+    const sheet = getCurrentSheet(currentDrawingId);
+    if (!sheet || !isCustomSheet(sheet)) {
+      flashStatus("組み込みの図面は削除できません");
+      return;
+    }
+    if (!discardPendingPlacementIfNeeded("図面を削除する")) return;
+    if (!confirm(`「${sheet.name}」を削除しますか？\n（区画・草図などの保存データも消えます）`)) return;
+
+    cancelPendingAutoSave();
+    const deletedName = sheet.name;
+    const deletedId = currentDrawingId;
+    deleteSheetDesign(currentProjectId, deletedId);
+    deleteProjectSheet(currentProjectId, deletedId);
+
+    rebuildSheetSelect();
+    if (currentSheets.length) {
+      const next = currentSheets.find((s) => s.id !== deletedId) || currentSheets[0];
+      document.getElementById("drawing-select").value = next.id;
+      await loadDrawing(next.id);
+    } else {
+      currentDrawingId = null;
+      canvas?.clear();
+    }
+    updateSheetActionButtons();
+    flashStatus(`「${deletedName}」を削除しました`);
+  });
 }
 
 function openSheetCopyModal() {
