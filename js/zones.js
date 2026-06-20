@@ -4,6 +4,8 @@ import {
   formatEdgeLength,
   getZoneCanvasPoints,
   computeZoneEdgeLengths,
+  canonicalEdgeKey,
+  buildSharedEdgeKeySet,
 } from "./drawing-scale.js";
 
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
@@ -91,12 +93,16 @@ function polygonCentroid(points) {
   return { x: x / points.length, y: y / points.length };
 }
 
+const EDGE_LABEL_FONT = 8;
+const EDGE_LABEL_OUTWARD_PAD = 18;
+const EDGE_LABEL_MIN_DIST = 42;
+
 function createDimMarker(kind) {
   return new fabric.Text("", {
-    fontSize: 10,
+    fontSize: EDGE_LABEL_FONT,
     fill: "#1e3a8a",
     fontWeight: "600",
-    backgroundColor: "rgba(255,255,255,0.92)",
+    backgroundColor: "rgba(255,255,255,0.94)",
     _zoneDim: kind,
     objectCaching: false,
     selectable: false,
@@ -104,6 +110,10 @@ function createDimMarker(kind) {
     originX: "center",
     originY: "center",
   });
+}
+
+function isEdgeLabelSlotTaken(pt, slots, minDist = EDGE_LABEL_MIN_DIST) {
+  return slots.some((s) => Math.hypot(s.x - pt.x, s.y - pt.y) < minDist);
 }
 
 function hideLegacyBBoxDims(group) {
@@ -116,6 +126,10 @@ function hideLegacyBBoxDims(group) {
 
 function syncEdgeDimMarkers(group, count) {
   let markers = group._objects?.filter((o) => o._zoneDim === "edge") ?? [];
+  while (markers.length > count) {
+    const extra = markers.pop();
+    group._objects = group._objects.filter((o) => o !== extra);
+  }
   while (markers.length < count) {
     group.add(createDimMarker("edge"));
     markers = group._objects?.filter((o) => o._zoneDim === "edge") ?? [];
@@ -131,25 +145,32 @@ function canvasPointToGroupLocal(group, pt) {
   return fabric.util.transformPoint(new fabric.Point(pt.x, pt.y), inv);
 }
 
-export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx) {
+export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, opts = {}) {
   const poly = group._objects?.[0];
   if (!poly?.points?.length) return;
 
   hideLegacyBBoxDims(group);
 
-  if (!mmPerImagePx || !drawingImage) {
+  const hideAll = () => {
     group._objects?.forEach((o) => {
       if (o._zoneDim === "edge") o.set({ text: "", visible: false });
     });
     group.dirty = true;
+  };
+
+  if (!mmPerImagePx || !drawingImage) {
+    hideAll();
     return;
   }
 
+  const pts = getZoneCanvasPoints(group);
   const edges = computeZoneEdgeLengths(group, drawingImage, mmPerImagePx);
   const markers = syncEdgeDimMarkers(group, edges.length);
   const groupAngle = group.angle || 0;
-  const outwardPad = 12 / Math.max(group.scaleX || 1, group.scaleY || 1, 0.25);
-  const showEdges = group.zoneShowEdgeLengths !== false;
+  const scale = Math.max(group.scaleX || 1, group.scaleY || 1, 0.25);
+  const outwardPad = EDGE_LABEL_OUTWARD_PAD / scale;
+  const showEdges = group.zoneShowEdgeLengths === true;
+  const { sharedEdges, occupiedSlots } = opts;
 
   edges.forEach((edge, i) => {
     const marker = markers[i];
@@ -160,13 +181,22 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx) {
       y: edge.midCanvas.y + edge.outwardCanvas.y * outwardPad,
     };
     const local = canvasPointToGroupLocal(group, outward);
+    const edgeKey = pts[i] && pts[(i + 1) % pts.length] ? canonicalEdgeKey(pts[i], pts[(i + 1) % pts.length]) : "";
+    const isShared = sharedEdges?.has(edgeKey);
+    const slotTaken = occupiedSlots && isEdgeLabelSlotTaken(outward, occupiedSlots);
+
+    let visible = showEdges && edge.lengthM != null && !isShared && !slotTaken;
+    if (visible && occupiedSlots) {
+      occupiedSlots.push({ x: outward.x, y: outward.y });
+    }
 
     marker.set({
-      text: showEdges && edge.lengthM != null ? `${edge.lengthM.toFixed(2)}m` : "",
+      text: visible ? `${edge.lengthM.toFixed(2)}m` : "",
       left: local.x,
       top: local.y,
       angle: edge.angleDeg - groupAngle,
-      visible: showEdges && edge.lengthM != null,
+      visible,
+      fontSize: EDGE_LABEL_FONT,
     });
   });
   if (typeof group.triggerLayout === "function") {
@@ -176,8 +206,37 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx) {
   group.dirty = true;
 }
 
-export function updateZoneDimensions(group, metrics, drawingImage, mmPerImagePx) {
-  updateZoneEdgeLengths(group, drawingImage, mmPerImagePx);
+/** 図面上の全区画 — 辺ラベルを1辺1箇所に整理して更新 */
+export function refreshAllZoneEdgeLabels(zones, drawingImage, mmPerImagePx) {
+  if (!zones?.length) return;
+  zones.forEach((z) => {
+    if (z.objectType === "zone") hideLegacyBBoxDims(z);
+  });
+
+  if (!mmPerImagePx || !drawingImage) {
+    zones.forEach((z) => {
+      z._objects?.forEach((o) => {
+        if (o._zoneDim === "edge") o.set({ text: "", visible: false });
+      });
+      z.dirty = true;
+    });
+    return;
+  }
+
+  const sharedEdges = buildSharedEdgeKeySet(zones);
+  const occupiedSlots = [];
+  zones.forEach((group) => {
+    if (group.objectType !== "zone") return;
+    updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, { sharedEdges, occupiedSlots });
+  });
+}
+
+export function updateZoneDimensions(group, metrics, drawingImage, mmPerImagePx, allZones = null) {
+  if (allZones?.length) {
+    refreshAllZoneEdgeLabels(allZones, drawingImage, mmPerImagePx);
+  } else {
+    updateZoneEdgeLengths(group, drawingImage, mmPerImagePx);
+  }
 }
 
 export function ensureZoneDimensionMarkers(group) {
@@ -190,10 +249,12 @@ export function ensureZoneDimensionMarkers(group) {
   return group;
 }
 
-export function refreshZoneDisplay(group, metrics, drawingImage, mmPerImagePx) {
+export function refreshZoneDisplay(group, metrics, drawingImage, mmPerImagePx, allZones = null) {
   updateZoneLabel(group, metrics);
-  updateZoneEdgeLengths(group, drawingImage, mmPerImagePx);
   refreshZoneMarkBadge(group);
+  if (allZones?.length) {
+    refreshAllZoneEdgeLabels(allZones, drawingImage, mmPerImagePx);
+  }
 }
 
 function buildZoneLabelText(name, metrics, opts = {}) {
@@ -601,6 +662,7 @@ export function upgradeZoneObject(obj) {
     return obj;
   }
   if (obj.objectType !== "zone" || obj.type !== "group") return obj;
+  if (obj.zoneShowEdgeLengths == null) obj.set({ zoneShowEdgeLengths: false });
   const poly = obj._objects?.[0];
   if (poly) {
     poly.set({ strokeLineJoin: "miter", strokeWidth: poly.strokeWidth || 2 });

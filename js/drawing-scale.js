@@ -213,6 +213,31 @@ export function computeZoneEdgeLengths(zone, drawingImage, mmPerImagePx) {
   return edges;
 }
 
+/** 同一辺判定用（隣接区画の重複ラベル抑止） */
+export function canonicalEdgeKey(a, b, tol = 4) {
+  const q = (v) => Math.round(v / tol) * tol;
+  const s1 = `${q(a.x)},${q(a.y)}`;
+  const s2 = `${q(b.x)},${q(b.y)}`;
+  return s1 < s2 ? `${s1}|${s2}` : `${s2}|${s1}`;
+}
+
+/** 2区画以上が共有する辺のキー集合 */
+export function buildSharedEdgeKeySet(zones) {
+  const counts = new Map();
+  zones.forEach((zone) => {
+    const pts = getZoneCanvasPoints(zone);
+    for (let i = 0; i < pts.length; i++) {
+      const key = canonicalEdgeKey(pts[i], pts[(i + 1) % pts.length]);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  });
+  const shared = new Set();
+  counts.forEach((c, k) => {
+    if (c > 1) shared.add(k);
+  });
+  return shared;
+}
+
 export function segmentMetrics(canvasA, canvasB, drawingImage, mmPerImagePx) {
   if (!mmPerImagePx || !drawingImage) return null;
   const ia = canvasToImagePx(canvasA, drawingImage);

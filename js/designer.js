@@ -33,6 +33,7 @@ import {
   enableZoneVertexEdit,
   refreshZoneDisplay,
   ensureZoneDimensionMarkers,
+  refreshAllZoneEdgeLabels,
 } from "./zones.js";
 import {
   addCustomZonePreset,
@@ -1442,7 +1443,8 @@ function bindZoneMarkProps(zone) {
 }
 
 function refreshZoneOnCanvas(zone, metrics) {
-  refreshZoneDisplay(zone, metrics, drawingImage, currentMmPerImagePx);
+  const zones = getZonesOnCanvas();
+  refreshZoneDisplay(zone, metrics, drawingImage, currentMmPerImagePx, zones);
 }
 
 function showPlacementHud(show) {
@@ -1604,10 +1606,15 @@ function computeZoneMetricsFor(zone) {
 }
 
 function refreshAllZoneMetrics() {
-  getZonesOnCanvas().forEach((zone) => {
+  const zones = getZonesOnCanvas();
+  zones.forEach((zone) => {
     ensureZoneDimensionMarkers(zone);
-    refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));
+    upgradeZoneObject(zone);
+    const metrics = computeZoneMetricsFor(zone);
+    updateZoneLabel(zone, metrics);
+    refreshZoneMarkBadge(zone);
   });
+  refreshAllZoneEdgeLabels(zones, drawingImage, currentMmPerImagePx);
   canvas?.requestRenderAll();
 }
 
@@ -3630,7 +3637,7 @@ function zoneLabelOpts(zone) {
 }
 
 function renderZoneDimToggles(zone) {
-  const showEdges = zone.zoneShowEdgeLengths !== false;
+  const showEdges = zone.zoneShowEdgeLengths === true;
   const showBBox = zone.zoneShowBBoxDims !== false;
   const showTsubo = zone.zoneShowTsubo !== false;
   return `
@@ -3643,11 +3650,12 @@ function renderZoneDimToggles(zone) {
         <input type="checkbox" id="prop-zone-edge-lengths" ${showEdges ? "checked" : ""} />
         辺
       </label>
-      <label class="zone-dim-toggle">
+      <label class="zone-dim-toggle" title="区画中央に横×縦を表示">
         <input type="checkbox" id="prop-zone-bbox-dims" ${showBBox ? "checked" : ""} />
         横縦
       </label>
     </div>
+    <p class="prop-meta zone-dim-note">辺の長さはデフォルト非表示。必要な区画だけ「辺」をONに（外周のみ・重ならない）</p>
   `;
 }
 
@@ -3655,7 +3663,7 @@ function bindZoneDimToggles(zone) {
   const onDimToggle = () => {
     zone.set({
       zoneShowTsubo: document.getElementById("prop-zone-tsubo")?.checked ?? true,
-      zoneShowEdgeLengths: document.getElementById("prop-zone-edge-lengths")?.checked ?? true,
+      zoneShowEdgeLengths: document.getElementById("prop-zone-edge-lengths")?.checked === true,
       zoneShowBBoxDims: document.getElementById("prop-zone-bbox-dims")?.checked ?? true,
     });
     refreshZoneOnCanvas(zone, computeZoneMetricsFor(zone));

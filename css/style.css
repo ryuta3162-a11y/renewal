@@ -694,6 +694,12 @@ body {
   margin-top: 0.3rem;
 }
 .zone-dim-toggle input { accent-color: var(--primary); }
+.zone-dim-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.65rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
 
 .marks-panel {
   margin-top: 0.75rem;
