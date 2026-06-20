@@ -85,12 +85,12 @@ import {
   initStorage,
   flushStorage,
   getStorageMigrationCount,
+  clearLegacyAliasDesigns,
 } from "./storage.js";
 import {
   collectSheetPages,
   buildShareBundle,
   applyShareBundle,
-  resolveImportSheetId,
   downloadShareBundle,
   readShareBundleFile,
   normalizeImportedJson,
@@ -4023,6 +4023,10 @@ function exportShareJson() {
 
 async function importShareJson(file) {
   if (!discardPendingPlacementIfNeeded("データを読み込む")) return;
+  if (!currentDrawingId) {
+    flashStatus("読み込み先の図面を開いてから「読込」を押してください");
+    return;
+  }
 
   try {
     const raw = await readShareBundleFile(file);
@@ -4033,22 +4037,21 @@ async function importShareJson(file) {
       return;
     }
 
-    const sheetLabel = bundle.sheet.name || bundle.sheet.id;
-    const targetSheetId = resolveImportSheetId(bundle, currentSheets, currentDrawingId);
+    const targetSheetId = currentDrawingId;
     const targetSheet = getCurrentSheet(targetSheetId);
     const targetLabel = targetSheet?.name || targetSheetId;
-    const mismatch = targetSheetId !== bundle.sheet.id;
-    const mismatchNote = mismatch
-      ? `\n※書き出し図面「${sheetLabel}」→ この端末では「${targetLabel}」に取り込みます。`
-      : "";
+    const sheetLabel = bundle.sheet.name || bundle.sheet.id;
 
     const ok = confirm(
-      `「${sheetLabel}」のデータを読み込みます。${mismatchNote}\n\n現在の「${targetLabel}」の保存データは上書きされます。よろしいですか？`
+      `「${sheetLabel}」のデータを、今開いている「${targetLabel}」に読み込みます。\n\n現在の「${targetLabel}」の保存データは上書きされます。よろしいですか？`
     );
     if (!ok) return;
 
-    if (currentDrawingId) persistCurrent();
+    cancelPendingAutoSave();
+    deleteSheetDesign(currentProjectId, targetSheetId);
+    clearLegacyAliasDesigns(currentProjectId, targetSheetId);
     applyShareBundle(bundle, currentProjectId, targetSheetId);
+    await flushStorage();
 
     if (bundle.extras?.customZonePresets?.length) buildZoneHooks();
 
@@ -4063,7 +4066,7 @@ async function importShareJson(file) {
 
     const from = bundle.author ? `${bundle.author}さんの` : "";
     const note = bundle.note ? ` — ${bundle.note}` : "";
-    flashStatus(`${from}データを読み込みました${note}`);
+    flashStatus(`${from}「${targetLabel}」に読み込みました${note}`);
   } catch (err) {
     setStatusError(`読み込み失敗: ${err?.message || err}`);
     console.error(err);

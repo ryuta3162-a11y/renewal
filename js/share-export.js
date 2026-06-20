@@ -70,15 +70,20 @@ export function validateShareBundle(data) {
   return null;
 }
 
-/** 受け取ったバンドルを localStorage へ書き込み（既存キーは上書き） */
+/** 受け取ったバンドルをストレージへ書き込み（既存キーは上書き） */
 export function applyShareBundle(bundle, targetProjectId, targetSheetId) {
   Object.entries(bundle.pages).forEach(([pageStr, pageData]) => {
     const page = parseInt(pageStr, 10);
     if (!Number.isFinite(page) || page < 1 || !pageData) return;
-    saveDesign(
-      designPageKey(targetProjectId, targetSheetId, page),
-      JSON.parse(JSON.stringify(pageData))
-    );
+    const copy = JSON.parse(JSON.stringify(pageData));
+    if (copy._sheetMeta) {
+      copy._sheetMeta = {
+        ...copy._sheetMeta,
+        name: copy._sheetMeta.name || bundle.sheet?.name,
+        file: copy._sheetMeta.file || bundle.sheet?.file,
+      };
+    }
+    saveDesign(designPageKey(targetProjectId, targetSheetId, page), copy);
   });
 
   const incoming = bundle.extras?.customZonePresets;

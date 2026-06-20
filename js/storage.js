@@ -1,4 +1,4 @@
-import { STORAGE_PREFIX } from "./constants.js";
+import { STORAGE_PREFIX, DRAWING_ID_ALIASES } from "./constants.js";
 
 const IDB_NAME = "renewal-studio";
 const IDB_VERSION = 1;
@@ -314,6 +314,12 @@ export function deleteSheetDesign(projectId, sheetId) {
   listSavedDesigns()
     .filter((k) => k.startsWith(prefix))
     .forEach((k) => removeDesign(k));
+}
+
+/** 旧 id の保存データを削除（新 id への読込時に干渉しないよう） */
+export function clearLegacyAliasDesigns(projectId, sheetId) {
+  const oldId = Object.entries(DRAWING_ID_ALIASES).find(([, v]) => v === sheetId)?.[0];
+  if (oldId) deleteSheetDesign(projectId, oldId);
 }
 
 /** 複数ページを別シートへ書き込み（上書き） */
