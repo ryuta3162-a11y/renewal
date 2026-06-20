@@ -1,4 +1,4 @@
-import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, MARKS_UI_ENABLED, getMarkPaletteParts, DEFAULT_PLAN_WIDTH_MM } from "./constants.js";
+import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, MARKS_UI_ENABLED, getMarkPaletteParts, DEFAULT_PLAN_WIDTH_MM, resolveDrawingUrl, DRAWING_ID_ALIASES } from "./constants.js";
 import {
   refreshProjects,
   setCachedProjects,
@@ -622,8 +622,25 @@ function isImageSheet(sheet) {
 }
 
 function getSheetPdfFile(sheet, pageNum = currentPage) {
-  if (sheet.pages?.length) return sheet.pages[Math.min(pageNum, sheet.pages.length) - 1];
-  return sheet.file;
+  if (sheet.pages?.length) return resolveDrawingUrl(sheet.pages[Math.min(pageNum, sheet.pages.length) - 1]);
+  return resolveDrawingUrl(sheet.file);
+}
+
+function loadSavedDesignForSheet(sheetId, page = currentPage) {
+  const ids = [sheetId];
+  const oldId = Object.entries(DRAWING_ID_ALIASES).find(([, v]) => v === sheetId)?.[0];
+  if (oldId) ids.push(oldId);
+  const newId = DRAWING_ID_ALIASES[sheetId];
+  if (newId) ids.push(newId);
+  for (const id of [...new Set(ids)]) {
+    const data = loadDesign(designPageKey(currentProjectId, id, page));
+    if (data) return data;
+  }
+  return null;
+}
+
+function pageKey() {
+  return designPageKey(currentProjectId, currentDrawingId, currentPage);
 }
 
 async function switchDrawing(id) {
@@ -639,7 +656,7 @@ async function loadSheetBackground(sheet) {
     totalPages = 1;
     drawingPdfPageCount = 0;
     updatePageUI();
-    const src = sheet.file.startsWith("data:") ? sheet.file : sheet.file;
+    const src = sheet.file.startsWith("data:") ? sheet.file : resolveDrawingUrl(sheet.file);
     await loadDrawingImage(src);
     return;
   }
@@ -677,7 +694,7 @@ async function loadDrawing(id) {
     drawingImage = null;
     polygonCleanup = null;
     resizeCanvas();
-    const saved = loadDesign(pageKey());
+    const saved = loadSavedDesignForSheet(currentDrawingId);
     scaleCalibrated = !!saved?.scaleCalibrated;
     scaleCalibSummary = saved?.scaleCalibSummary ?? null;
     scaleHudMinimized = saved?.scaleHudMinimized ?? !!saved?.scaleCalibrated;
@@ -943,7 +960,7 @@ async function reloadPage() {
     const stacked = await pdfToStackedDataUrl(getSheetPdfFile(sheet), 2);
     await loadDrawingImage(stacked.dataUrl);
   }
-  const saved = loadDesign(pageKey());
+  const saved = loadSavedDesignForSheet(currentDrawingId);
   scaleCalibrated = !!saved?.scaleCalibrated;
   scaleCalibSummary = saved?.scaleCalibSummary ?? null;
   scaleHudMinimized = saved?.scaleHudMinimized ?? !!saved?.scaleCalibrated;
@@ -963,10 +980,6 @@ async function reloadPage() {
   persistCurrent();
   pushHistory(true);
   setStatus(`${sheet.name} — ページ ${currentPage}`);
-}
-
-function pageKey() {
-  return `${currentProjectId}-${currentDrawingId}-p${currentPage}`;
 }
 
 function setupDrawStyle() {

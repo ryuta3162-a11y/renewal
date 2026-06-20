@@ -1,4 +1,4 @@
-import { DRAWINGS, MASTER_PROJECT_ID, STORAGE_PREFIX } from "./constants.js";
+import { DRAWINGS, MASTER_PROJECT_ID, STORAGE_PREFIX, resolveDrawingFile } from "./constants.js";
 
 const IMPORTED_KEY = STORAGE_PREFIX + "imported-proposals";
 const CUSTOM_SHEETS_KEY = STORAGE_PREFIX + "custom-sheets";
@@ -29,10 +29,11 @@ export function saveImportedProposals(list) {
 }
 
 function mapDrawingToSheet(d) {
+  const file = resolveDrawingFile(d.file);
   return {
     id: d.id,
     name: d.name,
-    file: d.file,
+    file,
     kind: d.kind || "pdf",
     pages: d.pages,
     planWidthMm: d.planWidthMm,
