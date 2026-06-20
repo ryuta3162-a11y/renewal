@@ -37,8 +37,17 @@ export function resolveDrawingUrl(file) {
   const path = resolveDrawingFile(file);
   if (!path || path.startsWith("data:")) return path;
   const i = path.lastIndexOf("/");
-  if (i < 0) return encodeURI(path);
-  return path.slice(0, i + 1) + encodeURIComponent(path.slice(i + 1));
+  const encoded =
+    i < 0 ? encodeURI(path) : path.slice(0, i + 1) + encodeURIComponent(path.slice(i + 1));
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return new URL(encoded, window.location.origin).href;
+  }
+  return encoded;
+}
+
+/** 同一PDF判定用（エイリアス解決後のパス） */
+export function drawingFileKey(file) {
+  return resolveDrawingFile(file || "");
 }
 
 export const DRAWINGS = [

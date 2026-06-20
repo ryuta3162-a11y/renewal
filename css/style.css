@@ -883,8 +883,17 @@ body {
 .canvas-area { display: flex; flex-direction: column; min-width: 0; }
 .canvas-wrap { flex: 1; background: var(--canvas-bg); position: relative; overflow: hidden; }
 .status-bar {
-  padding: 0.28rem 0.75rem; font-size: 0.7rem; color: var(--muted);
-  background: var(--surface); border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.status-bar.status-error {
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.45);
+  border-top-color: #b91c1c;
 }
 
 /* Memo tooltip */

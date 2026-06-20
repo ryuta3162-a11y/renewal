@@ -1,4 +1,4 @@
-import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, MARKS_UI_ENABLED, getMarkPaletteParts, DEFAULT_PLAN_WIDTH_MM, resolveDrawingUrl, DRAWING_ID_ALIASES } from "./constants.js";
+import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, MARKS_UI_ENABLED, getMarkPaletteParts, DEFAULT_PLAN_WIDTH_MM, resolveDrawingUrl, DRAWING_ID_ALIASES, drawingFileKey } from "./constants.js";
 import {
   refreshProjects,
   setCachedProjects,
@@ -111,6 +111,7 @@ let currentPage = 1;
 let totalPages = 1;
 /** 1つのPDF内のページ数（縦並び表示時は totalPages は 1 のまま） */
 let drawingPdfPageCount = 0;
+let loadDrawingSeq = 0;
 let polygonCleanup = null;
 let activeTool = "zone";
 let pendingZonePreset = ZONE_PRESETS[0];
@@ -586,7 +587,16 @@ function rebuildSheetSelect() {
     sel.appendChild(opt);
   });
   sel.onchange = () => switchDrawing(sel.value);
+  syncDrawingSelectValue();
   updateSheetActionButtons();
+}
+
+function syncDrawingSelectValue() {
+  const sel = document.getElementById("drawing-select");
+  if (!sel || !currentDrawingId) return;
+  if ([...sel.options].some((o) => o.value === currentDrawingId)) {
+    sel.value = currentDrawingId;
+  }
 }
 
 function updateSheetActionButtons() {
@@ -611,6 +621,7 @@ async function switchProject(projectId) {
   currentPage = 1;
   rebuildSheetSelect();
   if (currentSheets.length) await loadDrawing(currentSheets[0].id);
+  syncDrawingSelectValue();
 }
 
 function getCurrentSheet(id) {
@@ -644,11 +655,24 @@ function pageKey() {
 }
 
 async function switchDrawing(id) {
+  if (!id || id === currentDrawingId) return;
+  const prevId = currentDrawingId;
+  const prevSheet = prevId ? getCurrentSheet(prevId) : null;
   cancelPendingAutoSave();
-  if (!discardPendingPlacementIfNeeded("図面を切り替える")) return;
+  if (!discardPendingPlacementIfNeeded("図面を切り替える")) {
+    syncDrawingSelectValue();
+    return;
+  }
   if (currentDrawingId) persistCurrent();
   currentPage = 1;
-  await loadDrawing(id);
+  setStatus(`「${getCurrentSheet(id)?.name || id}」を読み込み中…`);
+  const ok = await loadDrawing(id, prevSheet);
+  if (!ok && prevId) {
+    currentPage = 1;
+    setStatusError(`切り替え失敗 — 「${prevSheet?.name || prevId}」に戻します`);
+    await loadDrawing(prevId);
+  }
+  syncDrawingSelectValue();
 }
 
 async function loadSheetBackground(sheet) {
@@ -679,30 +703,59 @@ async function loadSheetBackground(sheet) {
   await loadDrawingImage(stacked.dataUrl);
 }
 
-async function loadDrawing(id) {
+async function loadDrawing(id, prevSheet = null) {
   const sheet = getCurrentSheet(id);
-  if (!sheet) return;
+  if (!sheet) {
+    setStatusError(`図面「${id}」が一覧に見つかりません`);
+    return false;
+  }
+
+  const seq = ++loadDrawingSeq;
   cancelPendingAutoSave();
-  setStatus("図面を読み込み中…");
+  setStatus(`「${sheet.name}」を読み込み中…`);
   currentDrawingId = id;
-  document.getElementById("drawing-select").value = id;
+  syncDrawingSelectValue();
+  clearStatusError();
+
   try {
     isRestoringHistory = true;
+    if (zoneVertexEditCleanup) {
+      zoneVertexEditCleanup(false);
+      zoneVertexEditCleanup = null;
+    }
     pendingPlacementZone = null;
     showPlacementHud(false);
+    pauseZonePolygonDraw();
+    polygonCleanup = null;
+    currentMmPerImagePx = null;
+    scaleCalibrated = false;
+    scaleCalibSummary = null;
     canvas.clear();
     drawingImage = null;
-    polygonCleanup = null;
     resizeCanvas();
+    resetViewport();
+
     const saved = loadSavedDesignForSheet(currentDrawingId);
     scaleCalibrated = !!saved?.scaleCalibrated;
     scaleCalibSummary = saved?.scaleCalibSummary ?? null;
     scaleHudMinimized = saved?.scaleHudMinimized ?? !!saved?.scaleCalibrated;
+    currentMmPerImagePx = saved?.mmPerImagePx ?? null;
+
     await loadSheetBackground(sheet);
+    if (seq !== loadDrawingSeq) return false;
+
     resizeCanvas();
     placeDrawingOnCanvas(saved?.drawingTransform);
     await restoreDesign(pageKey(), saved, { skipViewport: true });
-    applySavedViewport(saved?.viewport);
+    if (seq !== loadDrawingSeq) return false;
+
+    if (saved?.viewport?.length === 6 && isValidViewport(saved.viewport)) {
+      applySavedViewport(saved.viewport);
+    } else {
+      resetViewport();
+      fitDrawing(false);
+    }
+
     if (!currentMmPerImagePx) tryDefaultScale();
     fillScaleTsuboFromSheet();
     refreshAllZoneMetrics();
@@ -723,12 +776,20 @@ async function loadDrawing(id) {
     const pageNote =
       drawingPdfPageCount > 1 ? `（${drawingPdfPageCount}ページ・下へ移動で閲覧）` : ` — ページ ${currentPage}`;
     setStatus(`${proj} / ${sheet.name}${pageNote}`);
+    if (prevSheet && drawingFileKey(prevSheet.file) === drawingFileKey(sheet.file)) {
+      flashStatus(`「${sheet.name}」に切り替えました（PDFは「${prevSheet.name}」と同じファイルです。区画データは別々に保存されます）`);
+    }
     updateSheetActionButtons();
+    canvas.requestRenderAll();
+    return true;
   } catch (err) {
+    if (seq !== loadDrawingSeq) return false;
     isRestoringHistory = false;
     cancelPendingAutoSave();
-    setStatus(`図面の読み込みに失敗: ${err?.message || err} — 図面を切り替えるか再読み込みしてください`);
-    console.error(err);
+    const msg = err?.message || String(err);
+    setStatusError(`「${sheet.name}」の読み込み失敗: ${msg}`);
+    console.error("loadDrawing failed:", sheet.name, err);
+    return false;
   }
 }
 
@@ -1140,8 +1201,8 @@ function cancelZonePlacement() {
 }
 
 function discardPendingPlacementIfNeeded(actionLabel) {
-  if (!pendingPlacementZone) return true;
-  if (!confirm(`配置中の区画があります。${actionLabel}すると破棄されます。よろしいですか？`)) {
+  if (!pendingPlacementZone && !zoneVertexEditCleanup) return true;
+  if (!confirm(`編集中の区画があります。${actionLabel}すると破棄されます。よろしいですか？`)) {
     return false;
   }
   cancelZonePlacement();
@@ -3902,15 +3963,28 @@ function setStatus(msg) {
   statusEl.dataset.base = msg;
 }
 
+function setStatusError(msg) {
+  statusEl.textContent = msg;
+  statusEl.dataset.base = msg;
+  statusEl.classList.add("status-error");
+}
+
+function clearStatusError() {
+  statusEl.classList.remove("status-error");
+}
+
 function flashStatus(msg) {
   setStatus(msg);
+  clearStatusError();
   setTimeout(() => {
     const sheet = getCurrentSheet(currentDrawingId);
     if (sheet) {
       const proj = document.getElementById("project-select").selectedOptions[0]?.textContent || "";
-      setStatus(`${proj} / ${sheet.name} — ページ ${currentPage}`);
+      const pageNote =
+        drawingPdfPageCount > 1 ? `（${drawingPdfPageCount}ページ）` : ` — ページ ${currentPage}`;
+      setStatus(`${proj} / ${sheet.name}${pageNote}`);
     }
-  }, 2500);
+  }, 4000);
 }
 
 function rgbaToHex(color) {

@@ -7,16 +7,12 @@ const PAGE_GAP = 12;
 
 async function openPdfDocument(url) {
   try {
-    return await pdfjsLib.getDocument(url).promise;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = await res.arrayBuffer();
+    return await pdfjsLib.getDocument({ data: buf }).promise;
   } catch (err) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const buf = await res.arrayBuffer();
-      return await pdfjsLib.getDocument({ data: buf }).promise;
-    } catch (err2) {
-      throw new Error(`PDFを開けませんでした (${url}): ${err2?.message || err?.message || err}`);
-    }
+    throw new Error(`PDFを開けませんでした (${url}): ${err?.message || err}`);
   }
 }
 
