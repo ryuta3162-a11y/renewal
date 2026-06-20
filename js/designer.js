@@ -3,6 +3,7 @@ import {
   refreshProjects,
   setCachedProjects,
   getCachedProjects,
+  getMasterProject,
   getProjectSheets,
   duplicateProjectSheet,
   deleteProjectSheet,
@@ -180,8 +181,26 @@ let marqueeOverlay = null;
 const PASTE_OFFSET = 24;
 const MARQUEE_MIN_PX = 4;
 
-init();
+bootstrapUiShell();
+init().catch((err) => {
+  console.error("Renewal Studio init failed:", err);
+  setStatusError(`起動に失敗しました: ${err?.message || err}`);
+});
+
+function bootstrapUiShell() {
+  try {
+    setCachedProjects([getMasterProject()]);
+    buildProjectSelect();
+    rebuildSheetSelect();
+  } catch (err) {
+    console.error("bootstrapUiShell failed:", err);
+  }
+}
+
 async function init() {
+  if (typeof fabric === "undefined") {
+    throw new Error("Fabric.js が読み込めませんでした。ネットワークを確認して再読み込みしてください。");
+  }
   applyProControls();
   initCanvas();
   try {
@@ -213,10 +232,11 @@ async function init() {
   if (MACHINES_UI_ENABLED) await rebuildPalette();
   await waitForLayout();
   const sheetParam = new URLSearchParams(location.search).get("sheet");
+  const preferredSheet = currentSheets.some((s) => s.id === "日下②") ? "日下②" : currentSheets[0]?.id;
   const startSheet =
     sheetParam && currentSheets.some((s) => s.id === sheetParam)
       ? sheetParam
-      : currentSheets[0]?.id;
+      : preferredSheet;
   if (!startSheet) {
     setStatusError("図面一覧が空です。ページを再読み込みしてください。");
   } else {
@@ -2097,7 +2117,7 @@ function buildZoneHooks() {
   if (!standardContainer) return;
 
   const collapsed = loadHookCollapsedState();
-  customContainer.innerHTML = "";
+  if (customContainer) customContainer.innerHTML = "";
   standardContainer.innerHTML = "";
 
   const customs = getAllZonePresets().filter((p) => p.isCustom);

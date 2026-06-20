@@ -174,8 +174,6 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, opts = 
   const outwardPad = EDGE_LABEL_OUTWARD_PAD / scale;
   const showEdges = group.zoneShowEdgeLengths === true;
   const { sharedEdges, occupiedSlots } = opts;
-
-  const poly = group._objects?.[0];
   const labelAnchor = poly ? polygonBBoxCenter(poly) : { x: 0, y: 0 };
 
   edges.forEach((edge, i) => {
