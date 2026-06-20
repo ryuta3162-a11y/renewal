@@ -78,6 +78,8 @@ import {
   designHasContent,
   StorageQuotaError,
   pruneOrphanDesigns,
+  listSavedPagesForSheet,
+  writeSheetPages,
 } from "./storage.js";
 import {
   collectSheetPages,
@@ -681,10 +683,8 @@ function loadSavedDesignForSheet(sheetId, page = currentPage) {
   return null;
 }
 
-function safePersistCurrent() {
-  if (!currentDrawingId || isRestoringHistory) return true;
-
-  const payload = {
+function captureCurrentPageSnapshot() {
+  return {
     objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
     viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
     mmPerImagePx: currentMmPerImagePx,
@@ -701,6 +701,37 @@ function safePersistCurrent() {
         }
       : null,
   };
+}
+
+function gatherSheetPagesForCopy(projectId, sheetId) {
+  const pages = {};
+  const nums = listSavedPagesForSheet(projectId, sheetId);
+  (nums.length ? nums : [1]).forEach((page) => {
+    const data = loadDesign(designPageKey(projectId, sheetId, page));
+    if (data && designHasContent(data)) {
+      pages[String(page)] = JSON.parse(JSON.stringify(data));
+    }
+  });
+  if (projectId === currentProjectId && sheetId === currentDrawingId) {
+    const live = captureCurrentPageSnapshot();
+    if (designHasContent(live)) {
+      pages[String(currentPage)] = JSON.parse(JSON.stringify(live));
+    }
+  }
+  return pages;
+}
+
+function storageRetryOpts(projectId) {
+  return {
+    projectId,
+    validSheetIds: getProjectSheets(projectId).map((s) => s.id),
+  };
+}
+
+function safePersistCurrent() {
+  if (!currentDrawingId || isRestoringHistory) return true;
+
+  const payload = captureCurrentPageSnapshot();
 
   const attempt = (retried) => {
     try {
@@ -2362,52 +2393,13 @@ function setupSheetCopyModal() {
       return;
     }
 
-    if (
-      srcProjectId === currentProjectId &&
-      srcSheetId === currentDrawingId
-    ) {
-      persistCurrent();
-    }
-
     const srcLabel = getSheetLabel(srcProjectId, srcSheetId);
     const destLabel = getSheetLabel(destProjectId, destSheetId);
 
-    if (!sheetHasSavedDesign(srcProjectId, srcSheetId)) {
-      const currentPageData =
-        srcProjectId === currentProjectId && srcSheetId === currentDrawingId
-          ? {
-              objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
-              scaleCalibrated,
-              mmPerImagePx: currentMmPerImagePx,
-              workBoundaryCanvasPoints: getWorkBoundaryPoints(),
-            }
-          : null;
-      if (!designHasContent(currentPageData)) {
-        flashStatus(`「${srcLabel}」にコピーできるデータがありません`);
-        return;
-      }
-      saveDesign(
-        designPageKey(srcProjectId, srcSheetId, currentPage),
-        JSON.parse(
-          JSON.stringify({
-            objects: currentPageData.objects,
-            viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
-            mmPerImagePx: currentPageData.mmPerImagePx,
-            scaleCalibrated: currentPageData.scaleCalibrated,
-            scaleCalibSummary,
-            scaleHudMinimized,
-            workBoundaryCanvasPoints: currentPageData.workBoundaryCanvasPoints,
-            drawingTransform: drawingImage
-              ? {
-                  left: drawingImage.left,
-                  top: drawingImage.top,
-                  scaleX: drawingImage.scaleX,
-                  scaleY: drawingImage.scaleY,
-                }
-              : null,
-          })
-        )
-      );
+    const pages = gatherSheetPagesForCopy(srcProjectId, srcSheetId);
+    if (!Object.keys(pages).length) {
+      flashStatus(`「${srcLabel}」にコピーできるデータがありません`);
+      return;
     }
 
     if (sheetHasSavedDesign(destProjectId, destSheetId)) {
@@ -2417,36 +2409,36 @@ function setupSheetCopyModal() {
       if (!ok) return;
     }
 
-    const { copied, pages } = copySheetDesign(
-      srcProjectId,
-      srcSheetId,
-      destProjectId,
-      destSheetId
-    );
-    if (!copied) {
-      flashStatus(`「${srcLabel}」にコピーできるデータがありません`);
-      return;
-    }
-
-    document.getElementById("sheet-copy-modal").close();
-
-    const pageNote = pages.length > 1 ? `（${pages.length}ページ）` : "";
-    flashStatus(`「${srcLabel}」→「${destLabel}」へコピーしました${pageNote}`);
-
-    if (destProjectId === currentProjectId && destSheetId === currentDrawingId) {
-      await loadDrawing(destSheetId);
-    } else if (
-      destProjectId !== currentProjectId ||
-      destSheetId !== currentDrawingId
-    ) {
-      const go = confirm(`コピー先の「${destLabel}」を開きますか？`);
-      if (go) {
-        if (destProjectId !== currentProjectId) {
-          document.getElementById("project-select").value = destProjectId;
-          await switchProject(destProjectId);
-        }
-        await switchDrawing(destSheetId);
+    try {
+      const { copied, pages: pageNums } = writeSheetPages(
+        destProjectId,
+        destSheetId,
+        pages,
+        storageRetryOpts(destProjectId)
+      );
+      if (!copied) {
+        flashStatus(`「${srcLabel}」にコピーできるデータがありません`);
+        return;
       }
+
+      document.getElementById("sheet-copy-modal").close();
+
+      const pageNote = pageNums.length > 1 ? `（${pageNums.length}ページ）` : "";
+      flashStatus(`「${srcLabel}」→「${destLabel}」へコピーしました${pageNote}`);
+
+      if (destProjectId !== currentProjectId) {
+        document.getElementById("project-select").value = destProjectId;
+        await switchProject(destProjectId);
+      }
+      document.getElementById("drawing-select").value = destSheetId;
+      await switchDrawing(destSheetId);
+    } catch (err) {
+      const msg =
+        err instanceof StorageQuotaError
+          ? `${err.message}\n（ヒント：不要な複製図面を削除するか、JSONでバックアップ後に整理してください）`
+          : err?.message || "コピーに失敗しました";
+      setStatusError(msg);
+      console.error("sheet copy failed:", err);
     }
   });
 }

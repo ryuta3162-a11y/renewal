@@ -32,6 +32,23 @@ export function saveDesign(drawingId, json) {
   }
 }
 
+/** 容量超過時に孤立データ削除を試みてから再保存 */
+export function saveDesignWithRetry(drawingId, json, retryOpts = {}) {
+  try {
+    return saveDesign(drawingId, json);
+  } catch (err) {
+    if (
+      err instanceof StorageQuotaError &&
+      retryOpts.projectId &&
+      retryOpts.validSheetIds?.length
+    ) {
+      const pruned = pruneOrphanDesigns(retryOpts.projectId, retryOpts.validSheetIds);
+      if (pruned > 0) return saveDesign(drawingId, json);
+    }
+    throw err;
+  }
+}
+
 export function loadDesign(drawingId) {
   try {
     const raw = localStorage.getItem(STORAGE_PREFIX + drawingId);
@@ -128,25 +145,37 @@ export function deleteSheetDesign(projectId, sheetId) {
     .forEach((k) => localStorage.removeItem(STORAGE_PREFIX + k));
 }
 
+/** 複数ページを別シートへ書き込み（上書き） */
+export function writeSheetPages(destProjectId, destSheetId, pages, retryOpts = {}) {
+  const written = [];
+  Object.entries(pages).forEach(([pageStr, pageData]) => {
+    const page = parseInt(pageStr, 10);
+    if (!Number.isFinite(page) || page < 1 || !pageData) return;
+    if (!designHasContent(pageData)) return;
+    saveDesignWithRetry(
+      designPageKey(destProjectId, destSheetId, page),
+      JSON.parse(JSON.stringify(pageData)),
+      retryOpts
+    );
+    written.push(page);
+  });
+  return { copied: written.length, pages: [...new Set(written)].sort((a, b) => a - b) };
+}
+
 /** 図面の全ページデータを別シートへ複製（localStorage） */
-export function copySheetDesign(srcProjectId, srcSheetId, destProjectId, destSheetId) {
+export function copySheetDesign(srcProjectId, srcSheetId, destProjectId, destSheetId, retryOpts = {}) {
   const prefix = `${srcProjectId}-${srcSheetId}-p`;
   const keys = listSavedDesigns().filter((k) => k.startsWith(prefix));
   if (!keys.length) return { copied: 0, pages: [] };
 
-  const pages = [];
-  try {
-    keys.forEach((key) => {
-      const page = parseInt(key.slice(prefix.length), 10);
-      if (!Number.isFinite(page) || page < 1) return;
-      const data = loadDesign(key);
-      if (!data) return;
-      saveDesign(designPageKey(destProjectId, destSheetId, page), JSON.parse(JSON.stringify(data)));
-      pages.push(page);
-    });
-  } catch (err) {
-    if (err instanceof StorageQuotaError) throw err;
-    throw err;
-  }
-  return { copied: pages.length, pages: [...new Set(pages)].sort((a, b) => a - b) };
+  const pages = {};
+  keys.forEach((key) => {
+    const page = parseInt(key.slice(prefix.length), 10);
+    if (!Number.isFinite(page) || page < 1) return;
+    const data = loadDesign(key);
+    if (!data || !designHasContent(data)) return;
+    pages[String(page)] = data;
+  });
+  if (!Object.keys(pages).length) return { copied: 0, pages: [] };
+  return writeSheetPages(destProjectId, destSheetId, pages, retryOpts);
 }
