@@ -95,6 +95,7 @@ import {
   readShareBundleFile,
   normalizeImportedJson,
   validateShareBundle,
+  countZonesInBundle,
 } from "./share-export.js";
 import {
   loadCustomParts,
@@ -3959,6 +3960,9 @@ function exportPng() {
 
 function setupShareExport() {
   document.getElementById("btn-export-json")?.addEventListener("click", exportShareJson);
+  document.getElementById("btn-recovery-json")?.addEventListener("click", () => {
+    void importBundledRecoveryJson();
+  });
   const fileInput = document.getElementById("import-json-input");
   document.getElementById("btn-import-json")?.addEventListener("click", () => {
     fileInput?.click();
@@ -4021,54 +4025,149 @@ function exportShareJson() {
   flashStatus(`「${sheet.name}」をJSONで書き出しました（バトンリレー用）`);
 }
 
-async function importShareJson(file) {
-  if (!discardPendingPlacementIfNeeded("データを読み込む")) return;
+function countZonesOnCanvas() {
+  return canvas?.getObjects().filter((o) => o.objectType === "zone").length ?? 0;
+}
+
+async function applyShareBundleToCurrentSheet(bundle) {
+  if (!discardPendingPlacementIfNeeded("データを読み込む")) return false;
   if (!currentDrawingId) {
-    flashStatus("読み込み先の図面を開いてから「読込」を押してください");
-    return;
+    alert("先に読み込み先の図面（例：日下②）を開いてから、もう一度お試しください。");
+    return false;
   }
 
+  const err = validateShareBundle(bundle);
+  if (err) {
+    setStatusError(err);
+    alert(`読み込みできませんでした:\n${err}`);
+    return false;
+  }
+
+  const targetSheetId = currentDrawingId;
+  const targetSheet = getCurrentSheet(targetSheetId);
+  const targetLabel = targetSheet?.name || targetSheetId;
+  const sheetLabel = bundle.sheet.name || bundle.sheet.id;
+  const expectedZones = countZonesInBundle(bundle);
+
+  const ok = confirm(
+    `「${sheetLabel}」のデータ（区画 ${expectedZones} 件）を、\n今開いている「${targetLabel}」に読み込みます。\n\n` +
+      `※ 必ず「日下②」（鉄格子のジム図面）を開いた状態で実行してください。\n` +
+      `現在の「${targetLabel}」の保存データは上書きされます。よろしいですか？`
+  );
+  if (!ok) return false;
+
+  cancelPendingAutoSave();
+  deleteSheetDesign(currentProjectId, targetSheetId);
+  clearLegacyAliasDesigns(currentProjectId, targetSheetId);
+
+  try {
+    applyShareBundle(bundle, currentProjectId, targetSheetId, storageRetryOpts(currentProjectId));
+  } catch (saveErr) {
+    const msg = saveErr?.message || String(saveErr);
+    setStatusError(`保存失敗: ${msg}`);
+    alert(`保存に失敗しました:\n${msg}`);
+    return false;
+  }
+
+  await flushStorage();
+
+  const savedKey = designPageKey(currentProjectId, targetSheetId, 1);
+  const savedCheck = loadDesign(savedKey);
+  if (!savedCheck?.objects?.length && expectedZones > 0) {
+    setStatusError("データを保存できませんでした");
+    alert("データの保存に失敗しました。Ctrl+Shift+R で再読み込みしてから、もう一度お試しください。");
+    return false;
+  }
+
+  if (bundle.extras?.customZonePresets?.length) buildZoneHooks();
+
+  currentPage = 1;
+  const pageNums = Object.keys(bundle.pages)
+    .map((k) => parseInt(k, 10))
+    .filter((n) => Number.isFinite(n) && n >= 1);
+  if (pageNums.length) currentPage = Math.min(...pageNums);
+
+  const loaded = await loadDrawing(targetSheetId);
+  syncDrawingSelectValue();
+
+  let onCanvas = countZonesOnCanvas();
+  if (loaded && expectedZones > 0 && onCanvas === 0) {
+    const saved = loadSavedDesignForSheet(targetSheetId);
+    if (saved?.objects?.length) {
+      canvas.getObjects().filter((o) => o.objectType !== "drawing").forEach((o) => canvas.remove(o));
+      await restoreDesign(pageKey(), saved, { skipViewport: true });
+      if (drawingImage) drawingImage.sendToBack();
+      placeDrawingOnCanvas(saved.drawingTransform);
+      if (saved.viewport?.length === 6) applySavedViewport(saved.viewport);
+      canvas.requestRenderAll();
+      onCanvas = countZonesOnCanvas();
+    }
+  }
+
+  const from = bundle.author ? `${bundle.author}さんの` : "";
+  const note = bundle.note ? ` — ${bundle.note}` : "";
+
+  if (!loaded) {
+    alert(
+      `図面の表示に失敗しました。\n\n` +
+        `データ自体は保存されている可能性があります。\n` +
+        `Ctrl+Shift+R で再読み込み後、「${targetLabel}」を開き直してください。`
+    );
+    return false;
+  }
+
+  if (expectedZones > 0 && onCanvas === 0) {
+    setStatusError(`区画 ${expectedZones} 件のはずが、画面に表示されませんでした`);
+    alert(
+      `保存は完了しましたが、区画が画面に出ませんでした（${expectedZones} 件のはず）。\n\n` +
+        `・「全体」ボタンで表示範囲を確認\n` +
+        `・F12 → Application → IndexedDB → renewal-studio を確認\n` +
+        `・再読み込み後にもう一度「読込」を試す`
+    );
+    return false;
+  }
+
+  const zoneNote = onCanvas ? `（区画 ${onCanvas} 件）` : "";
+  flashStatus(`${from}「${targetLabel}」に読み込みました${zoneNote}${note}`);
+  alert(
+    `読み込み完了 ${zoneNote}\n\n` +
+      `「${targetLabel}」に区画を復元しました。\n` +
+      `鉄格子の図面の上に重なっているか確認してください。\n\n` +
+      `ずれている場合：V（選択）→ 右ドラッグで全選択 → ドラッグで位置を合わせる`
+  );
+  return true;
+}
+
+async function importShareJson(file) {
   try {
     const raw = await readShareBundleFile(file);
     const bundle = normalizeImportedJson(raw);
-    const err = validateShareBundle(bundle);
-    if (err) {
-      setStatusError(err);
-      return;
-    }
-
-    const targetSheetId = currentDrawingId;
-    const targetSheet = getCurrentSheet(targetSheetId);
-    const targetLabel = targetSheet?.name || targetSheetId;
-    const sheetLabel = bundle.sheet.name || bundle.sheet.id;
-
-    const ok = confirm(
-      `「${sheetLabel}」のデータを、今開いている「${targetLabel}」に読み込みます。\n\n現在の「${targetLabel}」の保存データは上書きされます。よろしいですか？`
-    );
-    if (!ok) return;
-
-    cancelPendingAutoSave();
-    deleteSheetDesign(currentProjectId, targetSheetId);
-    clearLegacyAliasDesigns(currentProjectId, targetSheetId);
-    applyShareBundle(bundle, currentProjectId, targetSheetId);
-    await flushStorage();
-
-    if (bundle.extras?.customZonePresets?.length) buildZoneHooks();
-
-    currentPage = 1;
-    const pageNums = Object.keys(bundle.pages)
-      .map((k) => parseInt(k, 10))
-      .filter((n) => Number.isFinite(n) && n >= 1);
-    if (pageNums.length) currentPage = Math.min(...pageNums);
-
-    await loadDrawing(targetSheetId);
-    syncDrawingSelectValue();
-
-    const from = bundle.author ? `${bundle.author}さんの` : "";
-    const note = bundle.note ? ` — ${bundle.note}` : "";
-    flashStatus(`${from}「${targetLabel}」に読み込みました${note}`);
+    await applyShareBundleToCurrentSheet(bundle);
   } catch (err) {
     setStatusError(`読み込み失敗: ${err?.message || err}`);
+    alert(`読み込み失敗:\n${err?.message || err}`);
+    console.error(err);
+  }
+}
+
+async function importBundledRecoveryJson() {
+  if (!currentDrawingId) {
+    alert("先に「日下②」を図面一覧から開いてから、もう一度押してください。");
+    return;
+  }
+  const target = getCurrentSheet(currentDrawingId);
+  if (target?.id !== "日下②" && !confirm(`今開いているのは「${target?.name || currentDrawingId}」です。\n日下②向けの復元データをここに読み込みますか？`)) {
+    return;
+  }
+  try {
+    setStatus("復元データを取得中…");
+    const res = await fetch("/backups/kushita-2-recovery.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`復元ファイルが見つかりません (${res.status})`);
+    const bundle = normalizeImportedJson(await res.json());
+    await applyShareBundleToCurrentSheet(bundle);
+  } catch (err) {
+    setStatusError(`復元失敗: ${err?.message || err}`);
+    alert(`復元失敗:\n${err?.message || err}\n\n「読込」から手元のJSONファイルを選んでも同じことができます。`);
     console.error(err);
   }
 }

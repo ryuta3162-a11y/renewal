@@ -5,6 +5,7 @@ import {
   designPageKey,
   listSavedPagesForSheet,
   designHasContent,
+  writeSheetPages,
 } from "./storage.js";
 import { loadCustomZonePresets, saveCustomZonePresets } from "./zone-custom-presets.js";
 
@@ -70,21 +71,46 @@ export function validateShareBundle(data) {
   return null;
 }
 
+/** バンドル内の区画数（pages 内 objects を集計） */
+export function countZonesInBundle(bundle) {
+  let n = 0;
+  Object.values(bundle?.pages || {}).forEach((page) => {
+    (page?.objects || []).forEach((o) => {
+      if (o?.objectType === "zone" || o?.objectType === "fillArea") n++;
+    });
+  });
+  return n;
+}
+
+function normalizePageCopy(pageData, bundle) {
+  const copy = JSON.parse(JSON.stringify(pageData));
+  if (copy._sheetMeta) {
+    copy._sheetMeta = {
+      ...copy._sheetMeta,
+      name: copy._sheetMeta.name || bundle.sheet?.name,
+      file: copy._sheetMeta.file || bundle.sheet?.file,
+    };
+  }
+  return copy;
+}
+
 /** 受け取ったバンドルをストレージへ書き込み（既存キーは上書き） */
-export function applyShareBundle(bundle, targetProjectId, targetSheetId) {
+export function applyShareBundle(bundle, targetProjectId, targetSheetId, retryOpts = {}) {
+  const pages = {};
   Object.entries(bundle.pages).forEach(([pageStr, pageData]) => {
     const page = parseInt(pageStr, 10);
     if (!Number.isFinite(page) || page < 1 || !pageData) return;
-    const copy = JSON.parse(JSON.stringify(pageData));
-    if (copy._sheetMeta) {
-      copy._sheetMeta = {
-        ...copy._sheetMeta,
-        name: copy._sheetMeta.name || bundle.sheet?.name,
-        file: copy._sheetMeta.file || bundle.sheet?.file,
-      };
-    }
-    saveDesign(designPageKey(targetProjectId, targetSheetId, page), copy);
+    pages[pageStr] = normalizePageCopy(pageData, bundle);
   });
+
+  if (retryOpts.validSheetIds?.length) {
+    writeSheetPages(targetProjectId, targetSheetId, pages, retryOpts);
+  } else {
+    Object.entries(pages).forEach(([pageStr, copy]) => {
+      const page = parseInt(pageStr, 10);
+      saveDesign(designPageKey(targetProjectId, targetSheetId, page), copy);
+    });
+  }
 
   const incoming = bundle.extras?.customZonePresets;
   if (incoming?.length) {
