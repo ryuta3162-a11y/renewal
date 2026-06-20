@@ -891,15 +891,28 @@ body {
 .palette-del:hover { color: var(--danger); }
 
 /* Canvas */
-.canvas-area { display: flex; flex-direction: column; min-width: 0; }
-.canvas-wrap { flex: 1; background: var(--canvas-bg); position: relative; overflow: hidden; }
+.canvas-area {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.canvas-wrap { flex: 1; min-height: 0; background: var(--canvas-bg); position: relative; overflow: hidden; }
 .status-bar {
   flex-shrink: 0;
-  padding: 0.35rem 0.75rem;
+  min-height: 2rem;
+  padding: 0.4rem 0.75rem;
   font-size: 0.72rem;
+  line-height: 1.4;
   color: var(--muted);
   border-top: 1px solid var(--border);
   background: var(--surface);
+  z-index: 20;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 4.5rem;
+  overflow-y: auto;
 }
 .status-bar.status-error {
   color: #fecaca;

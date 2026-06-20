@@ -7,6 +7,7 @@ import {
   duplicateProjectSheet,
   deleteProjectSheet,
   isCustomSheet,
+  recoverCustomSheetsFromDesigns,
 } from "./projects.js";
 import {
   snapPoint,
@@ -206,6 +207,11 @@ async function init() {
   if (storageMigratedCount > 0) {
     flashStatus(`保存を大容量ストレージへ移行しました（${storageMigratedCount}件）`);
     storageMigratedCount = 0;
+  }
+  const recovered = recoverCustomSheetsFromDesigns(currentProjectId);
+  if (recovered > 0) {
+    rebuildSheetSelect();
+    flashStatus(`図面データから ${recovered} 件の複製図面を復元しました`);
   }
   setTool("zone");
 }
@@ -623,13 +629,10 @@ function populateProjectSelect(projects) {
 function rebuildSheetSelect() {
   const sel = document.getElementById("drawing-select");
   sel.innerHTML = "";
+  const recovered = recoverCustomSheetsFromDesigns(currentProjectId);
   currentSheets = getProjectSheets(currentProjectId);
-  const pruned = pruneOrphanDesigns(
-    currentProjectId,
-    currentSheets.map((s) => s.id)
-  );
-  if (pruned > 0) {
-    console.info(`Removed ${pruned} orphan design save(s) from storage`);
+  if (recovered > 0) {
+    console.info(`Recovered ${recovered} custom sheet(s) from saved design data`);
   }
   currentSheets.forEach((s) => {
     const opt = document.createElement("option");
@@ -712,6 +715,7 @@ function loadSavedDesignForSheet(sheetId, page = currentPage) {
 }
 
 function captureCurrentPageSnapshot() {
+  const sheet = currentDrawingId ? getCurrentSheet(currentDrawingId) : null;
   return {
     objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
     viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
@@ -726,6 +730,14 @@ function captureCurrentPageSnapshot() {
           top: drawingImage.top,
           scaleX: drawingImage.scaleX,
           scaleY: drawingImage.scaleY,
+        }
+      : null,
+    _sheetMeta: sheet
+      ? {
+          name: sheet.name,
+          file: sheet.file,
+          insertAfterId: sheet.insertAfterId,
+          nameRoot: sheet.nameRoot,
         }
       : null,
   };

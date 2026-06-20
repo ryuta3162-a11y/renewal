@@ -134,12 +134,16 @@ async function migrateFromLocalStorage() {
       localStorage.removeItem(fullKey);
       continue;
     }
-    if (!designCache.has(id)) {
-      cacheDesign(id, json, raw);
-      await idbPut(id, raw);
+    try {
+      if (!designCache.has(id)) {
+        cacheDesign(id, json, raw);
+        await idbPut(id, raw);
+      }
+      localStorage.removeItem(fullKey);
       moved++;
+    } catch (err) {
+      console.error("Migration kept in localStorage:", fullKey, err);
     }
-    localStorage.removeItem(fullKey);
   }
   return moved;
 }
@@ -278,17 +282,30 @@ function removeDesign(id) {
   if (db) queueIdbDelete(id);
 }
 
-/** 一覧に無い図面の保存データを削除 */
+/** 一覧に無い図面の保存データを削除（custom-* は削除しない） */
 export function pruneOrphanDesigns(projectId, validSheetIds) {
   const valid = new Set(validSheetIds);
   let removed = 0;
   listSavedDesigns().forEach((key) => {
     const parsed = parseDesignPageKey(key, projectId);
     if (!parsed || valid.has(parsed.sheetId)) return;
+    if (parsed.sheetId.startsWith("custom-")) return;
     removeDesign(key);
     removed++;
   });
   return removed;
+}
+
+/** IndexedDB / キャッシュ上の custom 図面 ID を列挙 */
+export function listCustomSheetIdsFromDesigns(projectId) {
+  const ids = new Set();
+  listSavedDesigns().forEach((key) => {
+    const parsed = parseDesignPageKey(key, projectId);
+    if (!parsed?.sheetId?.startsWith("custom-")) return;
+    if (!designHasContent(loadDesign(key))) return;
+    ids.add(parsed.sheetId);
+  });
+  return [...ids];
 }
 
 /** 図面の全ページ保存データを削除 */

@@ -1,5 +1,12 @@
 import { DRAWINGS, MASTER_PROJECT_ID, STORAGE_PREFIX, resolveDrawingFile, DRAWING_ID_ALIASES } from "./constants.js";
-import { StorageQuotaError } from "./storage.js";
+import {
+  StorageQuotaError,
+  listCustomSheetIdsFromDesigns,
+  listSavedDesigns,
+  loadDesign,
+  designHasContent,
+  parseDesignPageKey,
+} from "./storage.js";
 
 const IMPORTED_KEY = STORAGE_PREFIX + "imported-proposals";
 const CUSTOM_SHEETS_KEY = STORAGE_PREFIX + "custom-sheets";
@@ -232,6 +239,76 @@ export function getProjectSheets(projectId) {
   const p = getAllProjectsSync().find((x) => x.id === projectId);
   const base = (p?.sheets ?? DRAWINGS).map((s) => mapDrawingToSheet(s));
   return mergeSheetsWithCustom(base, getCustomSheetsForProject(projectId));
+}
+
+/**
+ * 保存データは残っているのに一覧から消えた複製図面を復元する。
+ */
+export function recoverCustomSheetsFromDesigns(projectId) {
+  const orphanIds = listCustomSheetIdsFromDesigns(projectId);
+  if (!orphanIds.length) return 0;
+
+  const map = loadCustomSheetsMap();
+  const list = map[projectId] || [];
+  const existing = new Set(list.map((s) => s.id));
+  let recovered = 0;
+  let n = 1;
+
+  orphanIds.forEach((sheetId) => {
+    if (existing.has(sheetId)) return;
+
+    const sampleKey = listSavedDesigns().find((k) => {
+      const p = parseDesignPageKey(k, projectId);
+      return p?.sheetId === sheetId;
+    });
+    const sample = sampleKey ? loadDesign(sampleKey) : null;
+
+    let file = "/drawings/日下②.pdf";
+    let insertAfterId = "日下②";
+    let nameRoot = "復元図面";
+    const legacyMeta = sample?._sheetMeta;
+    if (legacyMeta?.file) {
+      file = legacyMeta.file;
+      insertAfterId = legacyMeta.insertAfterId || insertAfterId;
+      nameRoot = legacyMeta.nameRoot || nameRoot;
+    }
+
+    const taken = new Set([
+      ...list.map((s) => s.name),
+      ...DRAWINGS.map((d) => d.name),
+    ]);
+    let name = legacyMeta?.name || `復元図面-${n}`;
+    while (taken.has(name)) {
+      n++;
+      name = `復元図面-${n}`;
+    }
+    n++;
+
+    list.push(
+      mapDrawingToSheet({
+        id: sheetId,
+        name,
+        file,
+        kind: "pdf",
+        isCustom: true,
+        nameRoot,
+        insertAfterId,
+      })
+    );
+    existing.add(sheetId);
+    recovered++;
+  });
+
+  if (recovered > 0) {
+    map[projectId] = list;
+    try {
+      saveCustomSheetsMap(map);
+    } catch (err) {
+      console.error("recoverCustomSheetsFromDesigns save failed:", err);
+      return 0;
+    }
+  }
+  return recovered;
 }
 
 export function addImportedProposal({ name, author, sheets }) {
