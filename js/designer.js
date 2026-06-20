@@ -1052,7 +1052,11 @@ async function loadDrawing(id, prevSheet = null) {
 
     if (!currentMmPerImagePx) tryDefaultScale();
     fillScaleTsuboFromSheet();
-    refreshAllZoneMetrics();
+    try {
+      refreshAllZoneMetrics();
+    } catch (metricsErr) {
+      console.error("refreshAllZoneMetrics failed:", metricsErr);
+    }
     updateScaleUI();
     if (saved?.workBoundaryCanvasPoints?.length) {
       applyWorkBoundary(saved.workBoundaryCanvasPoints);
@@ -1609,14 +1613,22 @@ function computeZoneMetricsFor(zone) {
 function refreshAllZoneMetrics() {
   const zones = getZonesOnCanvas();
   zones.forEach((zone) => {
-    ensureZoneDimensionMarkers(zone);
-    upgradeZoneObject(zone);
-    const metrics = computeZoneMetricsFor(zone);
-    updateZoneLabel(zone, metrics);
-    refreshZoneMarkBadge(zone);
+    try {
+      ensureZoneDimensionMarkers(zone);
+      upgradeZoneObject(zone);
+      const metrics = computeZoneMetricsFor(zone);
+      updateZoneLabel(zone, metrics);
+      refreshZoneMarkBadge(zone);
+    } catch (err) {
+      console.warn("zone metrics refresh failed:", zone.zoneName, err);
+    }
   });
-  refreshAllZoneEdgeLabels(zones, drawingImage, currentMmPerImagePx);
-  zones.forEach((zone) => refitZoneGroupBounds(zone));
+  try {
+    refreshAllZoneEdgeLabels(zones, drawingImage, currentMmPerImagePx);
+    zones.forEach((zone) => refitZoneGroupBounds(zone));
+  } catch (err) {
+    console.warn("edge label refresh failed:", err);
+  }
   canvas?.requestRenderAll();
 }
 

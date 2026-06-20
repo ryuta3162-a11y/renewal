@@ -10,7 +10,7 @@ import {
 
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
 import { refreshZoneMarkBadge, upgradeZoneMarkBadge } from "./zone-marks.js";
-import { refitZoneGroupBounds } from "./zone-layout.js";
+import { refitZoneGroupBounds, collapseEdgeDimMarkers } from "./zone-layout.js";
 
 /** 区画の塗り透明度（固定・UIから変更不可） */
 export const ZONE_FILL_OPACITY = 0.2;
@@ -329,7 +329,8 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
 
   group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
   if (metrics) group._zoneMetrics = metrics;
-  refitZoneGroupBounds(group);
+  collapseEdgeDimMarkers(group);
+  if (typeof group.triggerLayout === "function") group.triggerLayout();
   return group;
 }
 
@@ -355,11 +356,9 @@ export function setZoneCanvasPoints(zone, canvasPoints) {
   if (typeof poly._setPositionDimensions === "function") {
     poly._setPositionDimensions({});
   }
-  if (typeof poly._setPositionDimensions === "function") {
-    poly._setPositionDimensions({});
-  }
+  collapseEdgeDimMarkers(zone);
+  if (typeof zone.triggerLayout === "function") zone.triggerLayout();
   updateZoneLabel(zone, zone._zoneMetrics);
-  refitZoneGroupBounds(zone);
   zone.setCoords();
   clearZoneRenderCache(zone);
   return zone;
