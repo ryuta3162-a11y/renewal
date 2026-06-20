@@ -14,10 +14,14 @@ export const KYODO_SCALE_HINTS = [
 
 /** 旧ファイル名 → 現在の drawings 内の実ファイル */
 export const DRAWING_FILE_ALIASES = {
-  "/drawings/kushita-1.pdf": "/drawings/日下①.pdf",
-  "/drawings/kushita-2.pdf": "/drawings/日下②.pdf",
-  "/drawings/kushita-3.pdf": "/drawings/日下③.pdf",
-  "/drawings/mito.pdf": "/drawings/みと①.pdf",
+  "/drawings/kushita-1.pdf": "/drawings/日下　入口.pdf",
+  "/drawings/kushita-2.pdf": "/drawings/日下　2F.pdf",
+  "/drawings/kushita-3.pdf": "/drawings/日下 3F.pdf",
+  "/drawings/mito.pdf": "/drawings/みと　まとめ.pdf",
+  "/drawings/日下①.pdf": "/drawings/日下　入口.pdf",
+  "/drawings/日下②.pdf": "/drawings/日下　2F.pdf",
+  "/drawings/日下③.pdf": "/drawings/日下 3F.pdf",
+  "/drawings/みと①.pdf": "/drawings/みと　まとめ.pdf",
 };
 
 /** 旧 id → 新 id（保存データの引き継ぎ用） */
@@ -57,10 +61,10 @@ export const DRAWINGS = [
   { id: "kyodo-8", name: "原本-8", file: "/drawings/kyodo-8.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "kyodo-9", name: "原本-9", file: "/drawings/kyodo-9.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "kyodo-17", name: "原本-17", file: "/drawings/kyodo-17.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "みと①", name: "みと①", file: "/drawings/みと①.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "日下①", name: "日下①", file: "/drawings/日下①.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
-  { id: "日下②", name: "日下②", file: "/drawings/日下②.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
-  { id: "日下③", name: "日下③", file: "/drawings/日下③.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
+  { id: "みと①", name: "みと　まとめ", file: "/drawings/みと　まとめ.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "日下①", name: "日下　入口", file: "/drawings/日下　入口.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
+  { id: "日下②", name: "日下　2F", file: "/drawings/日下　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
+  { id: "日下③", name: "日下 3F", file: "/drawings/日下 3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
 ];
 
 /** false = マシンUI非表示（データファイルは残す） */

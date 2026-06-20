@@ -263,7 +263,7 @@ export function recoverCustomSheetsFromDesigns(projectId) {
     });
     const sample = sampleKey ? loadDesign(sampleKey) : null;
 
-    let file = "/drawings/日下②.pdf";
+    let file = "/drawings/日下　2F.pdf";
     let insertAfterId = "日下②";
     let nameRoot = "復元図面";
     const legacyMeta = sample?._sheetMeta;
