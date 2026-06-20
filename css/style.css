@@ -754,6 +754,17 @@ body {
   padding: 0 0.25rem;
 }
 .copy-fieldset .prop-field:last-child { margin-bottom: 0; }
+.copy-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0 0 0.65rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.copy-option input { margin-top: 0.15rem; flex-shrink: 0; }
+.copy-storage-hint { margin-top: 0; }
 
 .tools { border-left: 1px solid var(--border); border-right: 1px solid var(--border); padding: 0 0.6rem; }
 

@@ -26,7 +26,9 @@
         </label>
         <button class="btn btn-ghost btn-xs" id="btn-sheet-duplicate" title="選択中の図面を複製（区画データ付き）">複製</button>
         <button class="btn btn-ghost btn-xs" id="btn-sheet-delete" title="複製した図面を削除" disabled>削除</button>
-        <button class="btn btn-ghost btn-xs" id="btn-sheet-copy" title="区画・草図などを別図面へコピー">データコピー</button>
+        <button class="btn btn-ghost btn-xs" id="btn-sheet-copy" title="区画・草図などを別図面へコピー（詳細設定）">データコピー</button>
+        <button class="btn btn-ghost btn-xs" id="btn-sheet-clip-copy" title="この図面のデータをコピー（Ctrl+Shift+C）">シートコピー</button>
+        <button class="btn btn-ghost btn-xs" id="btn-sheet-clip-paste" title="コピーしたデータをこの図面に貼り付け（Ctrl+Shift+V）" disabled>貼り付け</button>
         <button class="btn btn-ghost btn-sm" id="btn-prev-page" disabled>←</button>
         <span id="page-info" class="page-info">—</span>
         <button class="btn btn-ghost btn-sm" id="btn-next-page" disabled>→</button>
@@ -188,6 +190,13 @@
             <select id="copy-to-sheet" required></select>
           </label>
         </fieldset>
+        <label class="copy-option" id="copy-move-source-wrap" hidden>
+          <input type="checkbox" id="copy-move-source" />
+          コピー元の複製図面を削除して移動する（容量不足のとき推奨）
+        </label>
+        <p class="modal-note copy-storage-hint" id="copy-storage-hint" hidden>
+          ブラウザの保存上限（約5MB）に近づいています。上のチェックをオンにするか、不要な複製図面を先に削除してください。
+        </p>
       </div>
       <footer class="modal-footer">
         <button type="button" class="btn btn-ghost" data-close>キャンセル</button>

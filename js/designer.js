@@ -80,6 +80,7 @@ import {
   pruneOrphanDesigns,
   listSavedPagesForSheet,
   writeSheetPages,
+  estimateStorageBytes,
 } from "./storage.js";
 import {
   collectSheetPages,
@@ -157,6 +158,8 @@ const historyLimit = 50;
 let isRestoringHistory = false;
 let lastPropsTargetKey = null;
 let clipboardObjectData = null;
+/** 図面シート単位のコピペ用（メモリのみ・localStorageを増やさない） */
+let sheetPasteClipboard = null;
 let marqueeDrag = null;
 let marqueeOverlay = null;
 
@@ -176,6 +179,7 @@ async function init() {
   setupShareExport();
   setupModals();
   setupSheetCopyModal();
+  setupSheetClipboard();
   setupSheetDuplicateDelete();
   setupPropsForm();
   setupDrawStyle();
@@ -726,6 +730,108 @@ function storageRetryOpts(projectId) {
     projectId,
     validSheetIds: getProjectSheets(projectId).map((s) => s.id),
   };
+}
+
+function updateSheetPasteButton() {
+  const btn = document.getElementById("btn-sheet-clip-paste");
+  if (!btn) return;
+  if (!sheetPasteClipboard?.pages || !Object.keys(sheetPasteClipboard.pages).length) {
+    btn.disabled = true;
+    btn.title = "コピーしたデータをこの図面に貼り付け";
+    return;
+  }
+  btn.disabled = false;
+  const src = sheetPasteClipboard.sheetName || sheetPasteClipboard.sheetId || "図面";
+  btn.title = `「${src}」のデータをこの図面に貼り付け`;
+}
+
+function copySheetToClipboard() {
+  if (!currentDrawingId) return;
+  const sheet = getCurrentSheet(currentDrawingId);
+  if (!sheet) return;
+
+  const pages = gatherSheetPagesForCopy(currentProjectId, currentDrawingId);
+  if (!Object.keys(pages).length) {
+    flashStatus("コピーできるデータがありません");
+    return;
+  }
+
+  sheetPasteClipboard = {
+    projectId: currentProjectId,
+    sheetId: currentDrawingId,
+    sheetName: sheet.name,
+    copiedAt: Date.now(),
+    pages: JSON.parse(JSON.stringify(pages)),
+  };
+  updateSheetPasteButton();
+  const n = Object.keys(pages).length;
+  const pageNote = n > 1 ? `（${n}ページ）` : "";
+  flashStatus(`「${sheet.name}」をシートコピーしました${pageNote} → 貼り付け先の図面を開いて「貼り付け」`);
+}
+
+async function pasteSheetFromClipboard() {
+  if (!currentDrawingId || !sheetPasteClipboard?.pages) {
+    flashStatus("貼り付けるデータがありません（先にシートコピーしてください）");
+    return;
+  }
+  const sheet = getCurrentSheet(currentDrawingId);
+  if (!sheet) return;
+
+  const srcName = sheetPasteClipboard.sheetName || sheetPasteClipboard.sheetId;
+  if (
+    sheetPasteClipboard.projectId === currentProjectId &&
+    sheetPasteClipboard.sheetId === currentDrawingId
+  ) {
+    flashStatus("同じ図面には貼り付けできません");
+    return;
+  }
+
+  if (sheetHasSavedDesign(currentProjectId, currentDrawingId)) {
+    const live = captureCurrentPageSnapshot();
+    const hasLive = designHasContent(live);
+    const ok = confirm(
+      hasLive
+        ? `「${sheet.name}」の既存データを「${srcName}」の内容で上書きしますか？`
+        : `「${sheet.name}」に「${srcName}」のデータを貼り付けますか？`
+    );
+    if (!ok) return;
+  }
+
+  cancelPendingAutoSave();
+  try {
+    deleteSheetDesign(currentProjectId, currentDrawingId);
+    const { copied, pages: pageNums } = writeSheetPages(
+      currentProjectId,
+      currentDrawingId,
+      sheetPasteClipboard.pages,
+      storageRetryOpts(currentProjectId)
+    );
+    if (!copied) {
+      flashStatus("貼り付けできるデータがありません");
+      return;
+    }
+    await loadDrawing(currentDrawingId);
+    const pageNote = pageNums.length > 1 ? `（${pageNums.length}ページ）` : "";
+    flashStatus(`「${srcName}」→「${sheet.name}」に貼り付けました${pageNote}`);
+  } catch (err) {
+    const usedMb = (estimateStorageBytes() / 1024 / 1024).toFixed(1);
+    const msg =
+      err instanceof StorageQuotaError
+        ? `${err.message}（使用量 約${usedMb}MB）\n不要な複製図面を削除してから再試行してください`
+        : err?.message || "貼り付けに失敗しました";
+    setStatusError(msg);
+    console.error("sheet paste failed:", err);
+  }
+}
+
+function setupSheetClipboard() {
+  document.getElementById("btn-sheet-clip-copy")?.addEventListener("click", () => {
+    copySheetToClipboard();
+  });
+  document.getElementById("btn-sheet-clip-paste")?.addEventListener("click", () => {
+    void pasteSheetFromClipboard();
+  });
+  updateSheetPasteButton();
 }
 
 function safePersistCurrent() {
@@ -2323,6 +2429,29 @@ function setupSheetDuplicateDelete() {
   });
 }
 
+function updateSheetCopyModalOptions() {
+  const fromProject = document.getElementById("copy-from-project");
+  const fromSheet = document.getElementById("copy-from-sheet");
+  const moveWrap = document.getElementById("copy-move-source-wrap");
+  const moveCheck = document.getElementById("copy-move-source");
+  const hint = document.getElementById("copy-storage-hint");
+  if (!fromProject || !fromSheet || !moveWrap) return;
+
+  const sheet = getProjectSheets(fromProject.value).find((s) => s.id === fromSheet.value);
+  const isMoveable =
+    fromProject.value === currentProjectId && sheet && isCustomSheet(sheet);
+  moveWrap.hidden = !isMoveable;
+  if (!isMoveable && moveCheck) moveCheck.checked = false;
+
+  if (hint) {
+    const usedMb = estimateStorageBytes() / 1024 / 1024;
+    hint.hidden = usedMb < 3.5;
+    if (!hint.hidden) {
+      hint.textContent = `ブラウザの保存使用量 約${usedMb.toFixed(1)}MB / 上限 約5MB。複製図面が多いとコピーできません。上のチェックをオンにするか、不要な複製図面を先に削除してください。`;
+    }
+  }
+}
+
 function openSheetCopyModal() {
   const modal = document.getElementById("sheet-copy-modal");
   if (!modal) return;
@@ -2348,6 +2477,7 @@ function openSheetCopyModal() {
     toSheet.value = toSheet.options[0].value;
   }
 
+  updateSheetCopyModalOptions();
   modal.showModal();
 }
 
@@ -2378,6 +2508,7 @@ function setupSheetCopyModal() {
       populateCopySheetSelect(toProject.value, toSheet, fromSheet.value);
       if (!toSheet.value && toSheet.options.length) toSheet.value = toSheet.options[0].value;
     }
+    updateSheetCopyModalOptions();
   });
 
   document.getElementById("sheet-copy-form")?.addEventListener("submit", async (e) => {
@@ -2409,22 +2540,51 @@ function setupSheetCopyModal() {
       if (!ok) return;
     }
 
+    const moveSource = document.getElementById("copy-move-source")?.checked;
+    const srcSheet = getProjectSheets(srcProjectId).find((s) => s.id === srcSheetId);
+    const canMoveSource = moveSource && srcSheet && isCustomSheet(srcSheet);
+
+    const attemptWrite = () =>
+      writeSheetPages(destProjectId, destSheetId, pages, storageRetryOpts(destProjectId));
+
     try {
-      const { copied, pages: pageNums } = writeSheetPages(
-        destProjectId,
-        destSheetId,
-        pages,
-        storageRetryOpts(destProjectId)
-      );
+      deleteSheetDesign(destProjectId, destSheetId);
+      if (canMoveSource) {
+        deleteSheetDesign(srcProjectId, srcSheetId);
+      }
+
+      let result;
+      try {
+        result = attemptWrite();
+      } catch (err) {
+        if (err instanceof StorageQuotaError && !canMoveSource && srcSheet && isCustomSheet(srcSheet)) {
+          const retry = confirm(
+            `保存容量が不足しています。\n「${srcLabel}」の複製データを削除してから、もう一度コピーを試しますか？\n（画面上のデータはこのコピーに使います。成功すれば日下②へ移せます）`
+          );
+          if (!retry) throw err;
+          deleteSheetDesign(srcProjectId, srcSheetId);
+          result = attemptWrite();
+        } else {
+          throw err;
+        }
+      }
+
+      const { copied, pages: pageNums } = result;
       if (!copied) {
         flashStatus(`「${srcLabel}」にコピーできるデータがありません`);
         return;
       }
 
+      if (canMoveSource) {
+        deleteProjectSheet(srcProjectId, srcSheetId);
+        rebuildSheetSelect();
+      }
+
       document.getElementById("sheet-copy-modal").close();
 
+      const moveNote = canMoveSource ? "（複製図面を削除して移動）" : "";
       const pageNote = pageNums.length > 1 ? `（${pageNums.length}ページ）` : "";
-      flashStatus(`「${srcLabel}」→「${destLabel}」へコピーしました${pageNote}`);
+      flashStatus(`「${srcLabel}」→「${destLabel}」へコピーしました${pageNote}${moveNote}`);
 
       if (destProjectId !== currentProjectId) {
         document.getElementById("project-select").value = destProjectId;
@@ -2433,9 +2593,10 @@ function setupSheetCopyModal() {
       document.getElementById("drawing-select").value = destSheetId;
       await switchDrawing(destSheetId);
     } catch (err) {
+      const usedMb = (estimateStorageBytes() / 1024 / 1024).toFixed(1);
       const msg =
         err instanceof StorageQuotaError
-          ? `${err.message}\n（ヒント：不要な複製図面を削除するか、JSONでバックアップ後に整理してください）`
+          ? `${err.message}（使用量 約${usedMb}MB / 上限 約5MB）\n① JSONでバックアップ → ② 不要な「図面3-2」等を削除 → ③ コピー時に「削除して移動」にチェック`
           : err?.message || "コピーに失敗しました";
       setStatusError(msg);
       console.error("sheet copy failed:", err);
@@ -4120,13 +4281,21 @@ function setupKeyboard() {
       e.preventDefault();
       deleteSelected();
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "C" || e.key === "c")) {
+      e.preventDefault();
+      copySheetToClipboard();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "V" || e.key === "v")) {
+      e.preventDefault();
+      void pasteSheetFromClipboard();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "c" && !e.shiftKey) {
       if (canCopyPasteSelection() && copySelectedObject()) {
         e.preventDefault();
         flashStatus("コピーしました");
       }
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+    if ((e.ctrlKey || e.metaKey) && e.key === "v" && !e.shiftKey) {
       if (canCopyPasteSelection() && clipboardObjectData) {
         e.preventDefault();
         pasteClipboardObject();
