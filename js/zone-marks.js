@@ -1,4 +1,5 @@
 import { MARK_PARTS } from "./constants.js";
+import { refitZoneGroupBounds } from "./zone-layout.js";
 
 const BADGE_H = 18;
 const BADGE_PAD_X = 6;
@@ -113,9 +114,8 @@ export function refreshZoneMarkBadge(group) {
   });
 
   group._objects.push(bg, txt);
-  if (typeof group.triggerLayout === "function") group.triggerLayout();
+  refitZoneGroupBounds(group);
   group.dirty = true;
-  group.setCoords();
   return group;
 }
 

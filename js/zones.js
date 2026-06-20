@@ -10,6 +10,7 @@ import {
 
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
 import { refreshZoneMarkBadge, upgradeZoneMarkBadge } from "./zone-marks.js";
+import { refitZoneGroupBounds } from "./zone-layout.js";
 
 /** 区画の塗り透明度（固定・UIから変更不可） */
 export const ZONE_FILL_OPACITY = 0.2;
@@ -145,6 +146,8 @@ function canvasPointToGroupLocal(group, pt) {
   return fabric.util.transformPoint(new fabric.Point(pt.x, pt.y), inv);
 }
 
+export { refitZoneGroupBounds } from "./zone-layout.js";
+
 export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, opts = {}) {
   const poly = group._objects?.[0];
   if (!poly?.points?.length) return;
@@ -172,6 +175,9 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, opts = 
   const showEdges = group.zoneShowEdgeLengths === true;
   const { sharedEdges, occupiedSlots } = opts;
 
+  const poly = group._objects?.[0];
+  const labelAnchor = poly ? polygonBBoxCenter(poly) : { x: 0, y: 0 };
+
   edges.forEach((edge, i) => {
     const marker = markers[i];
     if (!marker) return;
@@ -192,17 +198,14 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, opts = 
 
     marker.set({
       text: visible ? `${edge.lengthM.toFixed(2)}m` : "",
-      left: local.x,
-      top: local.y,
-      angle: edge.angleDeg - groupAngle,
+      left: visible ? local.x : labelAnchor.x,
+      top: visible ? local.y : labelAnchor.y,
+      angle: visible ? edge.angleDeg - groupAngle : 0,
       visible,
       fontSize: EDGE_LABEL_FONT,
     });
   });
-  if (typeof group.triggerLayout === "function") {
-    group.triggerLayout();
-  }
-  group.setCoords();
+  refitZoneGroupBounds(group);
   group.dirty = true;
 }
 
@@ -228,6 +231,7 @@ export function refreshAllZoneEdgeLabels(zones, drawingImage, mmPerImagePx) {
   zones.forEach((group) => {
     if (group.objectType !== "zone") return;
     updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, { sharedEdges, occupiedSlots });
+    refitZoneGroupBounds(group);
   });
 }
 
@@ -325,7 +329,7 @@ export function createZoneGroup(points, preset, memo = "", metrics = null) {
 
   group.setControlsVisibility({ mt: true, mb: true, ml: true, mr: true, mtr: true });
   if (metrics) group._zoneMetrics = metrics;
-  if (typeof group.triggerLayout === "function") group.triggerLayout();
+  refitZoneGroupBounds(group);
   return group;
 }
 
@@ -351,8 +355,11 @@ export function setZoneCanvasPoints(zone, canvasPoints) {
   if (typeof poly._setPositionDimensions === "function") {
     poly._setPositionDimensions({});
   }
-  if (typeof zone.triggerLayout === "function") zone.triggerLayout();
+  if (typeof poly._setPositionDimensions === "function") {
+    poly._setPositionDimensions({});
+  }
   updateZoneLabel(zone, zone._zoneMetrics);
+  refitZoneGroupBounds(zone);
   zone.setCoords();
   clearZoneRenderCache(zone);
   return zone;
@@ -677,6 +684,7 @@ export function upgradeZoneObject(obj) {
   }
   ensureZoneDimensionMarkers(obj);
   upgradeZoneMarkBadge(obj);
+  refitZoneGroupBounds(obj);
   return obj;
 }
 

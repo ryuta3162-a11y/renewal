@@ -34,6 +34,7 @@ import {
   refreshZoneDisplay,
   ensureZoneDimensionMarkers,
   refreshAllZoneEdgeLabels,
+  refitZoneGroupBounds,
 } from "./zones.js";
 import {
   addCustomZonePreset,
@@ -1615,6 +1616,7 @@ function refreshAllZoneMetrics() {
     refreshZoneMarkBadge(zone);
   });
   refreshAllZoneEdgeLabels(zones, drawingImage, currentMmPerImagePx);
+  zones.forEach((zone) => refitZoneGroupBounds(zone));
   canvas?.requestRenderAll();
 }
 
