@@ -1,5 +1,9 @@
 import { STORAGE_PREFIX } from "./constants.js";
 
+const IDB_NAME = "renewal-studio";
+const IDB_VERSION = 1;
+const IDB_STORE = "designs";
+
 export class StorageQuotaError extends Error {
   constructor(message) {
     super(message);
@@ -7,6 +11,15 @@ export class StorageQuotaError extends Error {
     this.code = "QUOTA_EXCEEDED";
   }
 }
+
+let db = null;
+/** @type {Map<string, object>} */
+const designCache = new Map();
+/** @type {Map<string, string>} */
+const payloadCache = new Map();
+let writeChain = Promise.resolve();
+let initPromise = null;
+let migratedFromLocalStorage = 0;
 
 function isQuotaError(err) {
   return (
@@ -16,16 +29,160 @@ function isQuotaError(err) {
   );
 }
 
+function idbRequest(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function openDatabase() {
+  if (db) return Promise.resolve(db);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = (event) => {
+      const database = event.target.result;
+      if (!database.objectStoreNames.contains(IDB_STORE)) {
+        database.createObjectStore(IDB_STORE, { keyPath: "id" });
+      }
+    };
+    req.onsuccess = () => {
+      db = req.result;
+      resolve(db);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGetAll() {
+  const tx = db.transaction(IDB_STORE, "readonly");
+  return idbRequest(tx.objectStore(IDB_STORE).getAll());
+}
+
+async function idbPut(id, payload) {
+  const tx = db.transaction(IDB_STORE, "readwrite");
+  await idbRequest(tx.objectStore(IDB_STORE).put({ id, payload }));
+}
+
+async function idbDelete(id) {
+  const tx = db.transaction(IDB_STORE, "readwrite");
+  await idbRequest(tx.objectStore(IDB_STORE).delete(id));
+}
+
+function cacheDesign(id, json, payload) {
+  designCache.set(id, json);
+  payloadCache.set(id, payload);
+}
+
+function parsePayload(payload) {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
+function removeFromCache(id) {
+  designCache.delete(id);
+  payloadCache.delete(id);
+}
+
+function queueIdbPut(id, payload) {
+  writeChain = writeChain.then(() => idbPut(id, payload)).catch((err) => {
+    console.error("IndexedDB save failed:", id, err);
+  });
+}
+
+function queueIdbDelete(id) {
+  writeChain = writeChain.then(() => idbDelete(id)).catch((err) => {
+    console.error("IndexedDB delete failed:", id, err);
+  });
+}
+
+async function loadCacheFromIdb() {
+  const rows = await idbGetAll();
+  rows.forEach((row) => {
+    if (!row?.id || typeof row.payload !== "string") return;
+    const json = parsePayload(row.payload);
+    if (!json) return;
+    cacheDesign(row.id, json, row.payload);
+  });
+}
+
+function collectLocalStorageDesignKeys() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(STORAGE_PREFIX)) {
+      keys.push(key);
+    }
+  }
+  return keys;
+}
+
+async function migrateFromLocalStorage() {
+  const keys = collectLocalStorageDesignKeys();
+  if (!keys.length) return 0;
+
+  let moved = 0;
+  for (const fullKey of keys) {
+    const id = fullKey.slice(STORAGE_PREFIX.length);
+    const raw = localStorage.getItem(fullKey);
+    if (!raw) continue;
+    const json = parsePayload(raw);
+    if (!json) {
+      localStorage.removeItem(fullKey);
+      continue;
+    }
+    if (!designCache.has(id)) {
+      cacheDesign(id, json, raw);
+      await idbPut(id, raw);
+      moved++;
+    }
+    localStorage.removeItem(fullKey);
+  }
+  return moved;
+}
+
+/** 起動時に1回だけ呼ぶ（IndexedDB 読み込み + localStorage からの自動移行） */
+export function initStorage() {
+  if (initPromise) return initPromise;
+  initPromise = (async () => {
+    if (!globalThis.indexedDB) {
+      console.warn("IndexedDB unavailable — falling back to in-memory only");
+      return { migrated: 0, backend: "memory" };
+    }
+    await openDatabase();
+    await loadCacheFromIdb();
+    migratedFromLocalStorage = await migrateFromLocalStorage();
+    return { migrated: migratedFromLocalStorage, backend: "indexeddb" };
+  })().catch((err) => {
+    initPromise = null;
+    console.error("initStorage failed:", err);
+    throw err;
+  });
+  return initPromise;
+}
+
+export function getStorageMigrationCount() {
+  return migratedFromLocalStorage;
+}
+
+/** 未保存の書き込みをフラッシュ（タブ非表示時など） */
+export function flushStorage() {
+  return writeChain;
+}
+
 export function saveDesign(drawingId, json) {
-  const key = STORAGE_PREFIX + drawingId;
   const payload = JSON.stringify(json);
   try {
-    localStorage.setItem(key, payload);
+    cacheDesign(drawingId, json, payload);
+    if (db) queueIdbPut(drawingId, payload);
     return true;
   } catch (err) {
     if (isQuotaError(err)) {
       throw new StorageQuotaError(
-        "ブラウザの保存容量が一杯です。不要な「複製」図面を削除するか、使っていない図面の区画を整理してください。"
+        "ブラウザの保存容量が一杯です。古い図面データを削除するか、JSONでバックアップ後に整理してください。"
       );
     }
     throw err;
@@ -50,23 +207,17 @@ export function saveDesignWithRetry(drawingId, json, retryOpts = {}) {
 }
 
 export function loadDesign(drawingId) {
+  const data = designCache.get(drawingId);
+  if (!data) return null;
   try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + drawingId);
-    return raw ? JSON.parse(raw) : null;
+    return JSON.parse(JSON.stringify(data));
   } catch {
     return null;
   }
 }
 
 export function listSavedDesigns() {
-  const keys = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key?.startsWith(STORAGE_PREFIX)) {
-      keys.push(key.slice(STORAGE_PREFIX.length));
-    }
-  }
-  return keys;
+  return [...designCache.keys()];
 }
 
 export function designPageKey(projectId, sheetId, page = 1) {
@@ -116,12 +267,15 @@ export function sheetHasSavedDesign(projectId, sheetId) {
 
 export function estimateStorageBytes() {
   let total = 0;
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    const val = localStorage.getItem(key);
-    total += (key?.length || 0) + (val?.length || 0);
-  }
+  payloadCache.forEach((payload, id) => {
+    total += id.length + payload.length;
+  });
   return total * 2;
+}
+
+function removeDesign(id) {
+  removeFromCache(id);
+  if (db) queueIdbDelete(id);
 }
 
 /** 一覧に無い図面の保存データを削除 */
@@ -131,7 +285,7 @@ export function pruneOrphanDesigns(projectId, validSheetIds) {
   listSavedDesigns().forEach((key) => {
     const parsed = parseDesignPageKey(key, projectId);
     if (!parsed || valid.has(parsed.sheetId)) return;
-    localStorage.removeItem(STORAGE_PREFIX + key);
+    removeDesign(key);
     removed++;
   });
   return removed;
@@ -142,7 +296,7 @@ export function deleteSheetDesign(projectId, sheetId) {
   const prefix = `${projectId}-${sheetId}-p`;
   listSavedDesigns()
     .filter((k) => k.startsWith(prefix))
-    .forEach((k) => localStorage.removeItem(STORAGE_PREFIX + k));
+    .forEach((k) => removeDesign(k));
 }
 
 /** 複数ページを別シートへ書き込み（上書き） */
@@ -162,7 +316,7 @@ export function writeSheetPages(destProjectId, destSheetId, pages, retryOpts = {
   return { copied: written.length, pages: [...new Set(written)].sort((a, b) => a - b) };
 }
 
-/** 図面の全ページデータを別シートへ複製（localStorage） */
+/** 図面の全ページデータを別シートへ複製 */
 export function copySheetDesign(srcProjectId, srcSheetId, destProjectId, destSheetId, retryOpts = {}) {
   const prefix = `${srcProjectId}-${srcSheetId}-p`;
   const keys = listSavedDesigns().filter((k) => k.startsWith(prefix));

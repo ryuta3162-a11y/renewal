@@ -81,6 +81,9 @@ import {
   listSavedPagesForSheet,
   writeSheetPages,
   estimateStorageBytes,
+  initStorage,
+  flushStorage,
+  getStorageMigrationCount,
 } from "./storage.js";
 import {
   collectSheetPages,
@@ -128,6 +131,7 @@ let totalPages = 1;
 let drawingPdfPageCount = 0;
 let loadDrawingSeq = 0;
 let isDrawingLoading = false;
+let storageMigratedCount = 0;
 let polygonCleanup = null;
 let activeTool = "zone";
 let pendingZonePreset = ZONE_PRESETS[0];
@@ -170,6 +174,16 @@ init();
 async function init() {
   applyProControls();
   initCanvas();
+  try {
+    const storageInfo = await initStorage();
+    storageMigratedCount = storageInfo.migrated || 0;
+    if (storageMigratedCount > 0) {
+      console.info(`Migrated ${storageMigratedCount} design(s) from localStorage to IndexedDB`);
+    }
+  } catch (err) {
+    setStatusError("データ保存の初期化に失敗しました。ページを再読み込みしてください。");
+    console.error(err);
+  }
   if (MACHINES_UI_ENABLED) await loadMachineManifest();
   const projects = await refreshProjects();
   setCachedProjects(projects);
@@ -189,6 +203,10 @@ async function init() {
   if (MACHINES_UI_ENABLED) await rebuildPalette();
   await waitForLayout();
   await loadDrawing(currentSheets[0].id);
+  if (storageMigratedCount > 0) {
+    flashStatus(`保存を大容量ストレージへ移行しました（${storageMigratedCount}件）`);
+    storageMigratedCount = 0;
+  }
   setTool("zone");
 }
 
@@ -523,7 +541,13 @@ function initCanvas() {
       canvas.requestRenderAll();
     }
   });
-  window.addEventListener("beforeunload", () => persistCurrent());
+  window.addEventListener("beforeunload", () => {
+    persistCurrent();
+    void flushStorage();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") void flushStorage();
+  });
 }
 
 function resizeCanvas() {
@@ -2445,9 +2469,9 @@ function updateSheetCopyModalOptions() {
 
   if (hint) {
     const usedMb = estimateStorageBytes() / 1024 / 1024;
-    hint.hidden = usedMb < 3.5;
+    hint.hidden = usedMb < 8;
     if (!hint.hidden) {
-      hint.textContent = `ブラウザの保存使用量 約${usedMb.toFixed(1)}MB / 上限 約5MB。複製図面が多いとコピーできません。上のチェックをオンにするか、不要な複製図面を先に削除してください。`;
+      hint.textContent = `図面データ 約${usedMb.toFixed(1)}MB 使用中。複製図面が多い場合は「削除して移動」にチェックするか、不要な複製を削除してください。`;
     }
   }
 }
