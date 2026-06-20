@@ -34,7 +34,6 @@ import {
   refreshZoneDisplay,
   ensureZoneDimensionMarkers,
   refreshAllZoneEdgeLabels,
-  refitZoneGroupBounds,
 } from "./zones.js";
 import {
   addCustomZonePreset,
@@ -217,8 +216,15 @@ async function init() {
   const startSheet =
     sheetParam && currentSheets.some((s) => s.id === sheetParam)
       ? sheetParam
-      : currentSheets[0].id;
-  await loadDrawing(startSheet);
+      : currentSheets[0]?.id;
+  if (!startSheet) {
+    setStatusError("図面一覧が空です。ページを再読み込みしてください。");
+  } else {
+    const loaded = await loadDrawing(startSheet);
+    if (!loaded) {
+      setStatusError("図面の読み込みに失敗しました。図面を切り替えるか「全体」ボタンを押してください。");
+    }
+  }
   if (new URLSearchParams(location.search).get("restored") === "1") {
     const n = canvas?.getObjects().filter((o) => o.objectType === "zone").length ?? 0;
     alert(
@@ -1077,6 +1083,7 @@ async function loadDrawing(id, prevSheet = null) {
       flashStatus(`「${sheet.name}」に切り替えました（PDFは「${prevSheet.name}」と同じファイルです。区画データは別々に保存されます）`);
     }
     updateSheetActionButtons();
+    ensureDrawingVisible();
     canvas.requestRenderAll();
     isDrawingLoading = false;
     setDrawingSelectLocked(false);
@@ -1625,7 +1632,6 @@ function refreshAllZoneMetrics() {
   });
   try {
     refreshAllZoneEdgeLabels(zones, drawingImage, currentMmPerImagePx);
-    zones.forEach((zone) => refitZoneGroupBounds(zone));
   } catch (err) {
     console.warn("edge label refresh failed:", err);
   }
@@ -4045,13 +4051,17 @@ function restoreDesign(key, data = loadDesign(key), opts = {}) {
     isRestoringHistory = true;
     fabric.util.enlivenObjects(data.objects, (objs) => {
       objs.forEach((o) => {
-        if (o.objectType === "fillArea" || o.objectType === "zone") {
-          upgradeZoneObject(o);
-          applyInteractiveControls(o);
-        } else {
-          upgradePartGroup(o);
+        try {
+          if (o.objectType === "fillArea" || o.objectType === "zone") {
+            upgradeZoneObject(o);
+            applyInteractiveControls(o);
+          } else {
+            upgradePartGroup(o);
+          }
+          canvas.add(o);
+        } catch (err) {
+          console.error("restore object failed:", err, o?.objectType, o?.zoneName);
         }
-        canvas.add(o);
       });
       if (drawingImage) drawingImage.sendToBack();
       canvas.requestRenderAll();

@@ -205,7 +205,6 @@ export function updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, opts = 
       fontSize: EDGE_LABEL_FONT,
     });
   });
-  refitZoneGroupBounds(group);
   group.dirty = true;
 }
 
@@ -231,7 +230,6 @@ export function refreshAllZoneEdgeLabels(zones, drawingImage, mmPerImagePx) {
   zones.forEach((group) => {
     if (group.objectType !== "zone") return;
     updateZoneEdgeLengths(group, drawingImage, mmPerImagePx, { sharedEdges, occupiedSlots });
-    refitZoneGroupBounds(group);
   });
 }
 
@@ -683,7 +681,6 @@ export function upgradeZoneObject(obj) {
   }
   ensureZoneDimensionMarkers(obj);
   upgradeZoneMarkBadge(obj);
-  refitZoneGroupBounds(obj);
   return obj;
 }
 
