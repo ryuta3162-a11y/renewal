@@ -78,6 +78,16 @@ import {
   designHasContent,
 } from "./storage.js";
 import {
+  collectSheetPages,
+  buildShareBundle,
+  applyShareBundle,
+  resolveImportSheetId,
+  downloadShareBundle,
+  readShareBundleFile,
+  normalizeImportedJson,
+  validateShareBundle,
+} from "./share-export.js";
+import {
   loadCustomParts,
   addCustomPart,
   deleteCustomPart,
@@ -158,6 +168,7 @@ async function init() {
   buildProjectSelect();
   rebuildSheetSelect();
   setupToolbar();
+  setupShareExport();
   setupModals();
   setupSheetCopyModal();
   setupSheetDuplicateDelete();
@@ -3661,6 +3672,119 @@ function exportPng() {
   a.href = canvas.toDataURL({ format: "png", multiplier: 2 });
   a.click();
   flashStatus("PNGをダウンロードしました");
+}
+
+function setupShareExport() {
+  document.getElementById("btn-export-json")?.addEventListener("click", exportShareJson);
+  const fileInput = document.getElementById("import-json-input");
+  document.getElementById("btn-import-json")?.addEventListener("click", () => {
+    fileInput?.click();
+  });
+  fileInput?.addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    await importShareJson(file);
+  });
+}
+
+function exportShareJson() {
+  if (!currentDrawingId) return;
+  persistCurrent();
+  const sheet = getCurrentSheet(currentDrawingId);
+  if (!sheet) return;
+
+  const pages = collectSheetPages(currentProjectId, currentDrawingId);
+  if (!Object.keys(pages).length) {
+    const live = {
+      objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
+      viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
+      mmPerImagePx: currentMmPerImagePx,
+      scaleCalibrated,
+      scaleCalibSummary,
+      scaleHudMinimized,
+      workBoundaryCanvasPoints: getWorkBoundaryPoints(),
+      drawingTransform: drawingImage
+        ? {
+            left: drawingImage.left,
+            top: drawingImage.top,
+            scaleX: drawingImage.scaleX,
+            scaleY: drawingImage.scaleY,
+          }
+        : null,
+    };
+    if (!designHasContent(live)) {
+      flashStatus("書き出すデータがありません（区画などを追加してください）");
+      return;
+    }
+    pages["1"] = JSON.parse(JSON.stringify(live));
+  }
+
+  const note = window.prompt("メモ（任意・受け取り用）", "") ?? "";
+  const author = window.prompt("作成者名（任意）", "") ?? "";
+  const projName =
+    document.getElementById("project-select")?.selectedOptions[0]?.textContent?.trim() || "原本";
+
+  const bundle = buildShareBundle({
+    projectId: currentProjectId,
+    projectName: projName,
+    sheet,
+    pages,
+    author,
+    note,
+  });
+
+  downloadShareBundle(bundle);
+  flashStatus(`「${sheet.name}」をJSONで書き出しました（バトンリレー用）`);
+}
+
+async function importShareJson(file) {
+  if (!discardPendingPlacementIfNeeded("データを読み込む")) return;
+
+  try {
+    const raw = await readShareBundleFile(file);
+    const bundle = normalizeImportedJson(raw);
+    const err = validateShareBundle(bundle);
+    if (err) {
+      setStatusError(err);
+      return;
+    }
+
+    const sheetLabel = bundle.sheet.name || bundle.sheet.id;
+    const targetSheetId = resolveImportSheetId(bundle, currentSheets, currentDrawingId);
+    const targetSheet = getCurrentSheet(targetSheetId);
+    const targetLabel = targetSheet?.name || targetSheetId;
+    const mismatch = targetSheetId !== bundle.sheet.id;
+    const mismatchNote = mismatch
+      ? `\n※書き出し図面「${sheetLabel}」→ この端末では「${targetLabel}」に取り込みます。`
+      : "";
+
+    const ok = confirm(
+      `「${sheetLabel}」のデータを読み込みます。${mismatchNote}\n\n現在の「${targetLabel}」の保存データは上書きされます。よろしいですか？`
+    );
+    if (!ok) return;
+
+    if (currentDrawingId) persistCurrent();
+    applyShareBundle(bundle, currentProjectId, targetSheetId);
+
+    if (bundle.extras?.customZonePresets?.length) buildZoneHooks();
+
+    currentPage = 1;
+    const pageNums = Object.keys(bundle.pages)
+      .map((k) => parseInt(k, 10))
+      .filter((n) => Number.isFinite(n) && n >= 1);
+    if (pageNums.length) currentPage = Math.min(...pageNums);
+
+    await loadDrawing(targetSheetId);
+    syncDrawingSelectValue();
+
+    const from = bundle.author ? `${bundle.author}さんの` : "";
+    const note = bundle.note ? ` — ${bundle.note}` : "";
+    flashStatus(`${from}データを読み込みました${note}`);
+  } catch (err) {
+    setStatusError(`読み込み失敗: ${err?.message || err}`);
+    console.error(err);
+  }
 }
 
 // ── Keyboard nudge (arrow keys) ───────────────────
