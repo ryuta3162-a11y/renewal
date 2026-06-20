@@ -1,4 +1,5 @@
-import { DRAWINGS, MASTER_PROJECT_ID, STORAGE_PREFIX, resolveDrawingFile } from "./constants.js";
+import { DRAWINGS, MASTER_PROJECT_ID, STORAGE_PREFIX, resolveDrawingFile, DRAWING_ID_ALIASES } from "./constants.js";
+import { StorageQuotaError } from "./storage.js";
 
 const IMPORTED_KEY = STORAGE_PREFIX + "imported-proposals";
 const CUSTOM_SHEETS_KEY = STORAGE_PREFIX + "custom-sheets";
@@ -56,11 +57,29 @@ export function loadCustomSheetsMap() {
 }
 
 function saveCustomSheetsMap(map) {
-  localStorage.setItem(CUSTOM_SHEETS_KEY, JSON.stringify(map));
+  try {
+    localStorage.setItem(CUSTOM_SHEETS_KEY, JSON.stringify(map));
+  } catch (err) {
+    if (err?.name === "QuotaExceededError" || err?.code === 22) {
+      throw new StorageQuotaError(
+        "ブラウザの保存容量が一杯です。不要な「複製」図面を削除してください。"
+      );
+    }
+    throw err;
+  }
+}
+
+function migrateSheetRefs(sheet) {
+  if (!sheet) return sheet;
+  let insertAfterId = sheet.insertAfterId;
+  if (insertAfterId && DRAWING_ID_ALIASES[insertAfterId]) {
+    insertAfterId = DRAWING_ID_ALIASES[insertAfterId];
+  }
+  return { ...sheet, insertAfterId };
 }
 
 export function getCustomSheetsForProject(projectId) {
-  return loadCustomSheetsMap()[projectId] || [];
+  return (loadCustomSheetsMap()[projectId] || []).map((s) => migrateSheetRefs(mapDrawingToSheet(s)));
 }
 
 export function isCustomSheet(sheet) {
@@ -132,7 +151,12 @@ export function duplicateProjectSheet(projectId, sourceSheetId) {
   const map = loadCustomSheetsMap();
   if (!map[projectId]) map[projectId] = [];
   map[projectId].push(newSheet);
-  saveCustomSheetsMap(map);
+  try {
+    saveCustomSheetsMap(map);
+  } catch (err) {
+    if (err instanceof StorageQuotaError) throw err;
+    return null;
+  }
   return newSheet;
 }
 

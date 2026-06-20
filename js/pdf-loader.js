@@ -67,6 +67,7 @@ export async function pdfToStackedDataUrl(url, scale = 2, gap = PAGE_GAP) {
     maxW = Math.max(maxW, rendered.width);
     totalH += rendered.height;
     if (i < numPages) totalH += gap;
+    if (i < numPages) await new Promise((r) => setTimeout(r, 0));
   }
 
   const out = document.createElement("canvas");

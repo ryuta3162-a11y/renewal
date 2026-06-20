@@ -76,6 +76,8 @@ import {
   deleteSheetDesign,
   sheetHasSavedDesign,
   designHasContent,
+  StorageQuotaError,
+  pruneOrphanDesigns,
 } from "./storage.js";
 import {
   collectSheetPages,
@@ -122,6 +124,7 @@ let totalPages = 1;
 /** 1つのPDF内のページ数（縦並び表示時は totalPages は 1 のまま） */
 let drawingPdfPageCount = 0;
 let loadDrawingSeq = 0;
+let isDrawingLoading = false;
 let polygonCleanup = null;
 let activeTool = "zone";
 let pendingZonePreset = ZONE_PRESETS[0];
@@ -591,13 +594,23 @@ function rebuildSheetSelect() {
   const sel = document.getElementById("drawing-select");
   sel.innerHTML = "";
   currentSheets = getProjectSheets(currentProjectId);
+  const pruned = pruneOrphanDesigns(
+    currentProjectId,
+    currentSheets.map((s) => s.id)
+  );
+  if (pruned > 0) {
+    console.info(`Removed ${pruned} orphan design save(s) from storage`);
+  }
   currentSheets.forEach((s) => {
     const opt = document.createElement("option");
     opt.value = s.id;
     opt.textContent = s.name;
     sel.appendChild(opt);
   });
-  sel.onchange = () => switchDrawing(sel.value);
+  sel.onchange = () => {
+    if (isDrawingLoading) return;
+    switchDrawing(sel.value);
+  };
   syncDrawingSelectValue();
   updateSheetActionButtons();
 }
@@ -649,16 +662,81 @@ function getSheetPdfFile(sheet, pageNum = currentPage) {
 }
 
 function loadSavedDesignForSheet(sheetId, page = currentPage) {
-  const ids = [sheetId];
-  const oldId = Object.entries(DRAWING_ID_ALIASES).find(([, v]) => v === sheetId)?.[0];
-  if (oldId) ids.push(oldId);
-  const newId = DRAWING_ID_ALIASES[sheetId];
-  if (newId) ids.push(newId);
-  for (const id of [...new Set(ids)]) {
-    const data = loadDesign(designPageKey(currentProjectId, id, page));
-    if (data) return data;
+  const key = designPageKey(currentProjectId, sheetId, page);
+  const exact = loadDesign(key);
+  if (exact) return exact;
+
+  // 複製図面は専用IDのデータのみ（他図面と混ぜない）
+  if (sheetId.startsWith("custom-")) return null;
+
+  const legacyNew = DRAWING_ID_ALIASES[sheetId];
+  if (legacyNew) {
+    const migrated = loadDesign(designPageKey(currentProjectId, legacyNew, page));
+    if (migrated) return migrated;
+  }
+  const legacyOld = Object.entries(DRAWING_ID_ALIASES).find(([, v]) => v === sheetId)?.[0];
+  if (legacyOld) {
+    return loadDesign(designPageKey(currentProjectId, legacyOld, page));
   }
   return null;
+}
+
+function safePersistCurrent() {
+  if (!currentDrawingId || isRestoringHistory) return true;
+
+  const payload = {
+    objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
+    viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
+    mmPerImagePx: currentMmPerImagePx,
+    scaleCalibrated,
+    scaleCalibSummary,
+    scaleHudMinimized,
+    workBoundaryCanvasPoints: getWorkBoundaryPoints(),
+    drawingTransform: drawingImage
+      ? {
+          left: drawingImage.left,
+          top: drawingImage.top,
+          scaleX: drawingImage.scaleX,
+          scaleY: drawingImage.scaleY,
+        }
+      : null,
+  };
+
+  const attempt = (retried) => {
+    try {
+      saveDesign(pageKey(), payload);
+      return true;
+    } catch (err) {
+      if (
+        !retried &&
+        (err instanceof StorageQuotaError || err?.code === "QUOTA_EXCEEDED")
+      ) {
+        const pruned = pruneOrphanDesigns(
+          currentProjectId,
+          currentSheets.map((s) => s.id)
+        );
+        if (pruned > 0) return attempt(true);
+      }
+      if (err instanceof StorageQuotaError || err?.code === "QUOTA_EXCEEDED") {
+        setStatusError(err.message);
+        return false;
+      }
+      throw err;
+    }
+  };
+
+  return attempt(false);
+}
+
+function setDrawingSelectLocked(locked) {
+  const sel = document.getElementById("drawing-select");
+  if (sel) sel.disabled = locked;
+}
+
+/** 大きいPDFほど低解像度で描画してフリーズを抑える */
+function pdfRenderScale(sheet) {
+  if (sheet.pages?.length) return 1.5;
+  return 1.5;
 }
 
 function pageKey() {
@@ -674,13 +752,19 @@ async function switchDrawing(id) {
     syncDrawingSelectValue();
     return;
   }
-  if (currentDrawingId) persistCurrent();
+  if (currentDrawingId && !safePersistCurrent()) {
+    syncDrawingSelectValue();
+    return;
+  }
   currentPage = 1;
   setStatus(`「${getCurrentSheet(id)?.name || id}」を読み込み中…`);
   const ok = await loadDrawing(id, prevSheet);
   if (!ok && prevId) {
     currentPage = 1;
-    setStatusError(`切り替え失敗 — 「${prevSheet?.name || prevId}」に戻します`);
+    const quotaMsg = statusEl?.classList.contains("status-error")
+      ? "（保存容量不足の可能性があります）"
+      : "";
+    setStatusError(`切り替え失敗${quotaMsg} — 「${prevSheet?.name || prevId}」に戻します`);
     await loadDrawing(prevId);
   }
   syncDrawingSelectValue();
@@ -700,13 +784,13 @@ async function loadSheetBackground(sheet) {
     drawingPdfPageCount = 0;
     totalPages = sheet.pages.length;
     updatePageUI();
-    const pdf = await pdfToDataUrl(getSheetPdfFile(sheet, currentPage), 1, 2);
+    const pdf = await pdfToDataUrl(getSheetPdfFile(sheet, currentPage), 1, pdfRenderScale(sheet));
     await loadDrawingImage(pdf.dataUrl);
     return;
   }
 
   setStatus("PDFを読み込み中…");
-  const stacked = await pdfToStackedDataUrl(getSheetPdfFile(sheet), 2);
+  const stacked = await pdfToStackedDataUrl(getSheetPdfFile(sheet), pdfRenderScale(sheet));
   drawingPdfPageCount = stacked.numPages;
   totalPages = 1;
   currentPage = 1;
@@ -722,6 +806,8 @@ async function loadDrawing(id, prevSheet = null) {
   }
 
   const seq = ++loadDrawingSeq;
+  isDrawingLoading = true;
+  setDrawingSelectLocked(true);
   cancelPendingAutoSave();
   setStatus(`「${sheet.name}」を読み込み中…`);
   currentDrawingId = id;
@@ -778,7 +864,6 @@ async function loadDrawing(id, prevSheet = null) {
     isRestoringHistory = false;
     applyMachinesVisibility();
     refreshZoneHooksList();
-    persistCurrent();
     pushHistory(true);
     if (!drawingImage) {
       throw new Error("図面画像の生成に失敗しました");
@@ -792,12 +877,23 @@ async function loadDrawing(id, prevSheet = null) {
     }
     updateSheetActionButtons();
     canvas.requestRenderAll();
+    isDrawingLoading = false;
+    setDrawingSelectLocked(false);
     return true;
   } catch (err) {
-    if (seq !== loadDrawingSeq) return false;
+    if (seq !== loadDrawingSeq) {
+      isDrawingLoading = false;
+      setDrawingSelectLocked(false);
+      return false;
+    }
     isRestoringHistory = false;
+    isDrawingLoading = false;
+    setDrawingSelectLocked(false);
     cancelPendingAutoSave();
-    const msg = err?.message || String(err);
+    const msg =
+      err instanceof StorageQuotaError || err?.code === "QUOTA_EXCEEDED"
+        ? err.message
+        : err?.message || String(err);
     setStatusError(`「${sheet.name}」の読み込み失敗: ${msg}`);
     console.error("loadDrawing failed:", sheet.name, err);
     return false;
@@ -1026,10 +1122,10 @@ async function reloadPage() {
   if (isImageSheet(sheet)) {
     await loadDrawingImage(sheet.file);
   } else if (sheet.pages?.length) {
-    const pdf = await pdfToDataUrl(getSheetPdfFile(sheet, currentPage), 1, 2);
+    const pdf = await pdfToDataUrl(getSheetPdfFile(sheet, currentPage), 1, pdfRenderScale(sheet));
     await loadDrawingImage(pdf.dataUrl);
   } else {
-    const stacked = await pdfToStackedDataUrl(getSheetPdfFile(sheet), 2);
+    const stacked = await pdfToStackedDataUrl(getSheetPdfFile(sheet), pdfRenderScale(sheet));
     await loadDrawingImage(stacked.dataUrl);
   }
   const saved = loadSavedDesignForSheet(currentDrawingId);
@@ -1049,7 +1145,6 @@ async function reloadPage() {
     applyWorkBoundary(saved.workBoundaryCanvasPoints);
   }
   isRestoringHistory = false;
-  persistCurrent();
   pushHistory(true);
   setStatus(`${sheet.name} — ページ ${currentPage}`);
 }
@@ -2136,15 +2231,31 @@ function setupSheetDuplicateDelete() {
 
     const srcId = currentDrawingId;
     const srcLabel = getCurrentSheet(srcId)?.name || srcId;
-    ensureSheetDesignPersisted(currentProjectId, srcId);
+    if (!safePersistCurrent()) return;
 
-    const newSheet = duplicateProjectSheet(currentProjectId, srcId);
-    if (!newSheet) {
-      flashStatus("図面を複製できませんでした");
+    let newSheet = null;
+    try {
+      newSheet = duplicateProjectSheet(currentProjectId, srcId);
+      if (!newSheet) {
+        flashStatus("図面を複製できませんでした");
+        return;
+      }
+      copySheetDesign(currentProjectId, srcId, currentProjectId, newSheet.id);
+    } catch (err) {
+      if (newSheet) {
+        deleteSheetDesign(currentProjectId, newSheet.id);
+        deleteProjectSheet(currentProjectId, newSheet.id);
+      }
+      const msg =
+        err instanceof StorageQuotaError
+          ? err.message
+          : err?.message || "図面を複製できませんでした";
+      setStatusError(msg);
+      rebuildSheetSelect();
+      syncDrawingSelectValue();
       return;
     }
 
-    copySheetDesign(currentProjectId, srcId, currentProjectId, newSheet.id);
     rebuildSheetSelect();
     document.getElementById("drawing-select").value = newSheet.id;
     await switchDrawing(newSheet.id);
@@ -3559,10 +3670,10 @@ function undo() {
 }
 
 function scheduleAutoSave() {
-  if (isRestoringHistory) return;
+  if (isRestoringHistory || isDrawingLoading) return;
   cancelPendingAutoSave();
   autoSaveTimer = setTimeout(() => {
-    persistCurrent();
+    if (!safePersistCurrent()) return;
     showAutoSaved();
   }, 600);
 }
@@ -3581,24 +3692,7 @@ function showAutoSaved() {
 }
 
 function persistCurrent() {
-  if (!currentDrawingId || isRestoringHistory) return;
-  saveDesign(pageKey(), {
-    objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
-    viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
-    mmPerImagePx: currentMmPerImagePx,
-    scaleCalibrated,
-    scaleCalibSummary,
-    scaleHudMinimized,
-    workBoundaryCanvasPoints: getWorkBoundaryPoints(),
-    drawingTransform: drawingImage
-      ? {
-          left: drawingImage.left,
-          top: drawingImage.top,
-          scaleX: drawingImage.scaleX,
-          scaleY: drawingImage.scaleY,
-        }
-      : null,
-  });
+  safePersistCurrent();
 }
 
 function restoreDesign(key, data = loadDesign(key), opts = {}) {
