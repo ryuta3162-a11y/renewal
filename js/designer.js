@@ -1,4 +1,4 @@
-import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, MARKS_UI_ENABLED, getMarkPaletteParts, DEFAULT_PLAN_WIDTH_MM, resolveDrawingUrl, DRAWING_ID_ALIASES, drawingFileKey } from "./constants.js";
+﻿import { DRAWINGS, DEFAULT_PARTS, MASTER_PROJECT_ID, MACHINES_UI_ENABLED, MARKS_UI_ENABLED, getMarkPaletteParts, DEFAULT_PLAN_WIDTH_MM, resolveDrawingUrl, DRAWING_ID_ALIASES, drawingFileKey } from "./constants.js";
 import {
   refreshProjects,
   setCachedProjects,
@@ -39,6 +39,13 @@ import {
   updateCustomZonePreset,
   deleteCustomZonePreset,
 } from "./zone-custom-presets.js";
+import {
+  applyZoneMark,
+  clearZoneMark,
+  formatZoneMarkSummary,
+  getZoneMarkRoleLabel,
+  refreshZoneMarkBadge,
+} from "./zone-marks.js";
 import { getInventoryParts, getCategoryOrder } from "./machine-inventory.js";
 import {
   loadMachineManifest,
@@ -204,7 +211,21 @@ async function init() {
   setupKeyboard();
   if (MACHINES_UI_ENABLED) await rebuildPalette();
   await waitForLayout();
-  await loadDrawing(currentSheets[0].id);
+  const sheetParam = new URLSearchParams(location.search).get("sheet");
+  const startSheet =
+    sheetParam && currentSheets.some((s) => s.id === sheetParam)
+      ? sheetParam
+      : currentSheets[0].id;
+  await loadDrawing(startSheet);
+  if (new URLSearchParams(location.search).get("restored") === "1") {
+    const n = canvas?.getObjects().filter((o) => o.objectType === "zone").length ?? 0;
+    alert(
+      n > 0
+        ? `復元データを読み込みました（区画 ${n} 件）。\n鉄格子の図面の上に重なっているか確認してください。`
+        : `データは保存済みですが、区画が ${n} 件しか表示されていません。\n「全体」ボタンを押して表示範囲を確認してください。`
+    );
+    history.replaceState({}, "", location.pathname);
+  }
   if (storageMigratedCount > 0) {
     flashStatus(`保存を大容量ストレージへ移行しました（${storageMigratedCount}件）`);
     storageMigratedCount = 0;
@@ -1353,6 +1374,71 @@ function setupZoneUI() {
 
   setupZoneSidebarResize();
   setupZoneSidebarToggle();
+}
+
+function renderZoneMarkPropsBlock(zone) {
+  if (!zone.zoneMarkRole) {
+    return `<p class="prop-meta zone-mark-hint">左の「記号」を選び、この区画をクリックするとバッジが付きます</p>`;
+  }
+  const summary = formatZoneMarkSummary(zone);
+  const role = zone.zoneMarkRole;
+  let extra = "";
+  if (role === "move-from") {
+    extra = `
+      <label class="prop-field mini">文字
+        <input type="text" id="prop-zone-mark-index" maxlength="3" placeholder="A" />
+      </label>`;
+  } else if (role === "move-to") {
+    const opts = getMoveFromIndices();
+    const options = (opts.length ? opts : ["A"])
+      .map((i) => `<option value="${esc(i)}">${esc(i)}</option>`)
+      .join("");
+    extra = `
+      <label class="prop-field mini">移動元
+        <select id="prop-zone-mark-link">${options}</select>
+      </label>`;
+  }
+  return `
+    <div class="zone-mark-block">
+      <p class="prop-meta"><strong>${esc(getZoneMarkRoleLabel(role))}</strong> · ${esc(summary)}</p>
+      ${extra}
+      <button type="button" class="btn btn-ghost btn-sm btn-block" id="btn-clear-zone-mark">記号を外す</button>
+    </div>`;
+}
+
+function bindZoneMarkProps(zone) {
+  document.getElementById("btn-clear-zone-mark")?.addEventListener("click", () => {
+    clearZoneMark(zone);
+    canvas.requestRenderAll();
+    pushHistory();
+    scheduleAutoSave();
+    updateProps();
+    flashStatus("記号バッジを外しました");
+  });
+  const idxInput = document.getElementById("prop-zone-mark-index");
+  if (idxInput) {
+    idxInput.value = zone.zoneMarkIndex || "";
+    idxInput.addEventListener("change", (e) => {
+      zone.set({ zoneMarkIndex: e.target.value.trim().toUpperCase() });
+      refreshZoneMarkBadge(zone);
+      canvas.requestRenderAll();
+      pushHistory();
+      scheduleAutoSave();
+      updateProps();
+    });
+  }
+  const linkSel = document.getElementById("prop-zone-mark-link");
+  if (linkSel) {
+    linkSel.value = zone.zoneMarkLinkIndex || linkSel.value;
+    linkSel.addEventListener("change", (e) => {
+      zone.set({ zoneMarkLinkIndex: e.target.value });
+      refreshZoneMarkBadge(zone);
+      canvas.requestRenderAll();
+      pushHistory();
+      scheduleAutoSave();
+      updateProps();
+    });
+  }
 }
 
 function refreshZoneOnCanvas(zone, metrics) {
@@ -2655,6 +2741,9 @@ function allowsMarkPlacement() {
 
 function getNextMarkIndex() {
   const used = new Set();
+  getZonesOnCanvas().forEach((z) => {
+    if (z.zoneMarkRole === "move-from" && z.zoneMarkIndex) used.add(z.zoneMarkIndex);
+  });
   canvas?.getObjects().forEach((o) => {
     if (o.objectType === "part" && o.partMarkRole === "move-from" && o.partMarkIndex) {
       used.add(o.partMarkIndex);
@@ -2669,12 +2758,36 @@ function getNextMarkIndex() {
 
 function getMoveFromIndices() {
   const indices = [];
+  getZonesOnCanvas().forEach((z) => {
+    if (z.zoneMarkRole === "move-from" && z.zoneMarkIndex) {
+      if (!indices.includes(z.zoneMarkIndex)) indices.push(z.zoneMarkIndex);
+    }
+  });
   canvas?.getObjects().forEach((o) => {
     if (o.objectType === "part" && o.partMarkRole === "move-from" && o.partMarkIndex) {
       if (!indices.includes(o.partMarkIndex)) indices.push(o.partMarkIndex);
     }
   });
   return indices.sort();
+}
+
+function attachMarkToZone(zone, def = pendingPart) {
+  if (!zone || zone.objectType !== "zone" || !def?.markRole) return;
+  applyZoneMark(zone, def, {
+    getNextIndex: getNextMarkIndex,
+    getMoveFromIndices,
+  });
+  canvas.bringToFront(zone);
+  if (drawingImage) drawingImage.sendToBack();
+  pendingPart = null;
+  highlightSelectedMark();
+  setTool("select");
+  canvas.setActiveObject(zone);
+  updateProps();
+  pushHistory();
+  scheduleAutoSave();
+  canvas.requestRenderAll();
+  flashStatus(`「${zone.zoneName || "区画"}」に「${def.label}」バッジを付けました`);
 }
 
 function rebuildMarksPalette() {
@@ -2689,10 +2802,10 @@ function rebuildMarksPalette() {
     btn.className = "marks-item";
     btn.dataset.partId = def.id;
     btn.title = def.markRole === "move-from"
-      ? "移動元 — 自動で A,B,C… を付与"
+      ? "移動元 — 区画に A,B,C… バッジを付ける"
       : def.markRole === "move-to"
-        ? "移動先 — どの移動元へ入るか右パネルで指定"
-        : `${def.label} — 図面をクリックして配置`;
+        ? "移動先 — 区画にバッジを付け、右パネルで移動元を指定"
+        : `${def.label} — 区画をクリックしてバッジを付ける`;
     btn.innerHTML = `
       <span class="marks-swatch" style="background:${def.fill};border-color:${def.stroke}">${esc(def.markRole === "move-from" ? "A" : def.markRole === "move-to" ? "→A" : def.mark || "●")}</span>
       <span class="marks-label">${esc(def.label)}</span>
@@ -2712,12 +2825,17 @@ function highlightSelectedMark() {
 function selectMarkPart(def) {
   if (!MARKS_UI_ENABLED) return;
   pendingPart = { ...def };
-  setTool("place");
+  const active = canvas.getActiveObject();
+  if (active?.objectType === "zone") {
+    attachMarkToZone(active, def);
+    return;
+  }
+  setTool("select");
   const hint = def.markRole === "move-from"
-    ? `「${def.label}」— クリックで配置（A,B,C…が自動付与）`
+    ? `「${def.label}」— 区画をクリックしてバッジ（A,B,C…）を付ける`
     : def.markRole === "move-to"
-      ? `「${def.label}」— クリックで配置 → 右パネルで移動元を指定`
-      : `「${def.label}」— 図面をクリックして配置`;
+      ? `「${def.label}」— 区画をクリック → 右パネルで移動元を指定`
+      : `「${def.label}」— 区画をクリックしてバッジを付ける`;
   flashStatus(hint);
   highlightSelectedMark();
 }
@@ -2923,6 +3041,18 @@ function onCanvasMouseDown(opt) {
 
   if (activeTool === "zone") return;
 
+  if (allowsMarkPlacement() && pendingPart) {
+    let zone = null;
+    if (opt.target?.objectType === "zone") zone = opt.target;
+    else if (opt.target?.group?.objectType === "zone") zone = opt.target.group;
+    if (zone) {
+      attachMarkToZone(zone);
+      return;
+    }
+    flashStatus("記号は区画に付けます — 区画をクリックしてください");
+    return;
+  }
+
   if (e.button === 0 && activeTool === "select" && opt.target?.objectType === "zone") {
     canvas.setActiveObject(opt.target);
     return;
@@ -2931,12 +3061,6 @@ function onCanvasMouseDown(opt) {
   if (shouldStartPan(opt)) {
     if (e.button === 1) e.preventDefault();
     startPan(e);
-    return;
-  }
-
-  if (allowsMarkPlacement() && activeTool === "place" && (!opt.target || opt.target?.objectType === "drawing")) {
-    const ptr = canvas.getPointer(e);
-    void placeMarkAt(ptr.x, ptr.y);
     return;
   }
 
@@ -3048,18 +3172,6 @@ async function onCanvasMouseUp(opt) {
     pushHistory();
     setTool("select");
   }
-}
-
-async function placeMarkAt(x, y) {
-  if (!pendingPart) return;
-  if (!isInsideWorkBoundary({ x, y })) {
-    flashStatus("枠の外");
-    return;
-  }
-  await addPartToCanvas(pendingPart, x, y);
-  pushHistory();
-  scheduleAutoSave();
-  canvas.requestRenderAll();
 }
 
 async function addPartToCanvas(def, x, y, w, h) {
@@ -3672,14 +3784,17 @@ function updateProps() {
     const sizeBlock = metrics
       ? `<p class="prop-meta zone-size-meta">${esc(formatZoneSizeText(metrics, zoneLabelOpts(obj)).replace("\n", " · "))}</p>`
       : "";
+    const markBlock = renderZoneMarkPropsBlock(obj);
     content.innerHTML = `
       ${sizeBlock}
+      ${markBlock}
       ${renderZoneDimToggles(obj)}
       <div class="zone-prop-actions">
         <button type="button" class="btn btn-primary btn-sm" id="btn-shape-zone">⬡ 形を修正</button>
         <button type="button" class="btn btn-danger btn-sm zone-delete-btn" id="btn-delete-zone" title="削除">🗑</button>
       </div>
     `;
+    bindZoneMarkProps(obj);
     bindZoneDimToggles(obj);
     document.getElementById("btn-shape-zone")?.addEventListener("click", () => {
       enterZoneVertexEditMode(obj, false);
@@ -3960,9 +4075,6 @@ function exportPng() {
 
 function setupShareExport() {
   document.getElementById("btn-export-json")?.addEventListener("click", exportShareJson);
-  document.getElementById("btn-recovery-json")?.addEventListener("click", () => {
-    void importBundledRecoveryJson();
-  });
   const fileInput = document.getElementById("import-json-input");
   document.getElementById("btn-import-json")?.addEventListener("click", () => {
     fileInput?.click();
@@ -4146,28 +4258,6 @@ async function importShareJson(file) {
   } catch (err) {
     setStatusError(`読み込み失敗: ${err?.message || err}`);
     alert(`読み込み失敗:\n${err?.message || err}`);
-    console.error(err);
-  }
-}
-
-async function importBundledRecoveryJson() {
-  if (!currentDrawingId) {
-    alert("先に「日下②」を図面一覧から開いてから、もう一度押してください。");
-    return;
-  }
-  const target = getCurrentSheet(currentDrawingId);
-  if (target?.id !== "日下②" && !confirm(`今開いているのは「${target?.name || currentDrawingId}」です。\n日下②向けの復元データをここに読み込みますか？`)) {
-    return;
-  }
-  try {
-    setStatus("復元データを取得中…");
-    const res = await fetch("/backups/kushita-2-recovery.json", { cache: "no-store" });
-    if (!res.ok) throw new Error(`復元ファイルが見つかりません (${res.status})`);
-    const bundle = normalizeImportedJson(await res.json());
-    await applyShareBundleToCurrentSheet(bundle);
-  } catch (err) {
-    setStatusError(`復元失敗: ${err?.message || err}`);
-    alert(`復元失敗:\n${err?.message || err}\n\n「読込」から手元のJSONファイルを選んでも同じことができます。`);
     console.error(err);
   }
 }

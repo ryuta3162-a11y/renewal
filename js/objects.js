@@ -21,6 +21,10 @@ const SERIALIZE_PROPS = [
   "zoneShowEdgeLengths",
   "zoneShowBBoxDims",
   "zoneShowTsubo",
+  "zoneMarkRole",
+  "zoneMarkLabel",
+  "zoneMarkIndex",
+  "zoneMarkLinkIndex",
 ];
 
 const LABEL_PAD = 5;

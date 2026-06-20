@@ -7,6 +7,7 @@ import {
 } from "./drawing-scale.js";
 
 import { loadCustomZonePresets } from "./zone-custom-presets.js";
+import { refreshZoneMarkBadge, upgradeZoneMarkBadge } from "./zone-marks.js";
 
 /** 区画の塗り透明度（固定・UIから変更不可） */
 export const ZONE_FILL_OPACITY = 0.2;
@@ -40,6 +41,10 @@ export const ZONE_SERIALIZE_PROPS = [
   "zoneShowEdgeLengths",
   "zoneShowBBoxDims",
   "zoneShowTsubo",
+  "zoneMarkRole",
+  "zoneMarkLabel",
+  "zoneMarkIndex",
+  "zoneMarkLinkIndex",
 ];
 
 export function getZoneStyle(color) {
@@ -188,6 +193,7 @@ export function ensureZoneDimensionMarkers(group) {
 export function refreshZoneDisplay(group, metrics, drawingImage, mmPerImagePx) {
   updateZoneLabel(group, metrics);
   updateZoneEdgeLengths(group, drawingImage, mmPerImagePx);
+  refreshZoneMarkBadge(group);
 }
 
 function buildZoneLabelText(name, metrics, opts = {}) {
@@ -608,6 +614,7 @@ export function upgradeZoneObject(obj) {
     updateZoneLabel(obj);
   }
   ensureZoneDimensionMarkers(obj);
+  upgradeZoneMarkBadge(obj);
   return obj;
 }
 

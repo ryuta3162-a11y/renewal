@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>日下② 区画データ復元</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0f1419;
+      color: #e8ecf0;
+      padding: 24px;
+    }
+    .card {
+      max-width: 520px;
+      width: 100%;
+      background: #1a222c;
+      border: 1px solid #2d3a48;
+      border-radius: 12px;
+      padding: 28px 32px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.35);
+    }
+    h1 { margin: 0 0 8px; font-size: 1.35rem; }
+    .sub { color: #8b9aab; font-size: .92rem; margin-bottom: 20px; line-height: 1.5; }
+    .zones {
+      background: #121820;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 16px 0;
+      font-size: .88rem;
+      line-height: 1.7;
+    }
+    .zones strong { color: #89fbde; }
+    button {
+      width: 100%;
+      padding: 14px 20px;
+      font-size: 1.05rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background: #3b82f6;
+      color: #fff;
+    }
+    button:hover { background: #2563eb; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .log {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: .85rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .log.ok { background: #0d2818; color: #6ee7a0; border: 1px solid #1a4d2e; }
+    .log.err { background: #2a1215; color: #fca5a5; border: 1px solid #5c2020; }
+    .log.info { background: #121820; color: #94a3b8; border: 1px solid #2d3a48; }
+    a { color: #60a5fa; }
+    ol { padding-left: 1.2em; margin: 12px 0; color: #94a3b8; font-size: .88rem; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>日下② 区画データ復元</h1>
+    <p class="sub">
+      バックアップ（区画10件）をブラウザ内ストレージへ直接書き込み、<strong>日下②</strong>（鉄格子ジム図面）で開きます。<br>
+      他のタブで Renewal Studio を開いている場合は<strong>すべて閉じて</strong>から実行してください。
+    </p>
+    <div class="zones" id="zone-list">読み込み中…</div>
+    <button id="btn-restore" type="button">復元して日下②を開く</button>
+    <ol>
+      <li>ボタンを押す</li>
+      <li>「復元完了」と出たら自動でアプリが開く</li>
+      <li>区画が見えないときは「全体」ボタンを押す</li>
+    </ol>
+    <div id="log" class="log info" hidden></div>
+    <p class="sub" style="margin-top:20px;margin-bottom:0">
+      <a href="index.html">← アプリに戻る</a>
+    </p>
+  </div>
+  <script>
+    const SHEET_ID = "日下②";
+    const PROJECT_ID = "master";
+    const PAGE = 1;
+    const STORAGE_KEY = `${PROJECT_ID}-${SHEET_ID}-p${PAGE}`;
+    const IDB_NAME = "renewal-studio";
+    const IDB_STORE = "designs";
+    const BACKUP_URL = "/backups/kushita-2-recovery.json";
+
+    const logEl = document.getElementById("log");
+    const btn = document.getElementById("btn-restore");
+    const zoneListEl = document.getElementById("zone-list");
+
+    function showLog(text, kind = "info") {
+      logEl.hidden = false;
+      logEl.className = "log " + kind;
+      logEl.textContent = text;
+    }
+
+    function openDb() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            db.createObjectStore(IDB_STORE, { keyPath: "id" });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error("IndexedDB を開けません"));
+      });
+    }
+
+    function idbPut(db, id, payload) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, "readwrite");
+        tx.objectStore(IDB_STORE).put({ id, payload });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    function idbGet(db, id) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, "readonly");
+        const req = tx.objectStore(IDB_STORE).get(id);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function countZones(page) {
+      return (page?.objects || []).filter(
+        (o) => o.objectType === "zone" || o.objectType === "fillArea"
+      ).length;
+    }
+
+    function listZoneNames(bundle) {
+      const names = [];
+      Object.values(bundle.pages || {}).forEach((page) => {
+        (page?.objects || []).forEach((o) => {
+          if (o.objectType === "zone" && o.zoneName) names.push(o.zoneName);
+        });
+      });
+      return names;
+    }
+
+    async function loadBackup() {
+      const res = await fetch(BACKUP_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error(`バックアップ取得失敗 (${res.status})`);
+      return res.json();
+    }
+
+    async function restore() {
+      btn.disabled = true;
+      showLog("バックアップを取得中…", "info");
+
+      if (!window.indexedDB) {
+        throw new Error("このブラウザは IndexedDB に対応していません。Chrome または Edge をお使いください。");
+      }
+
+      const bundle = await loadBackup();
+      const page = bundle.pages?.["1"] || bundle.pages?.[1];
+      if (!page?.objects?.length) throw new Error("バックアップに区画データがありません");
+
+      const zoneCount = countZones(page);
+      showLog(`バックアップ確認 OK（区画 ${zoneCount} 件）\nストレージへ書き込み中…`, "info");
+
+      const payload = JSON.stringify(page);
+      const db = await openDb();
+      await idbPut(db, STORAGE_KEY, payload);
+
+      const row = await idbGet(db, STORAGE_KEY);
+      if (!row?.payload) throw new Error("書き込み後の確認に失敗しました");
+
+      const verify = JSON.parse(row.payload);
+      const savedZones = countZones(verify);
+      if (savedZones !== zoneCount) {
+        throw new Error(`保存確認失敗（${savedZones}/${zoneCount} 件）`);
+      }
+
+      showLog(
+        `復元完了！\n区画 ${savedZones} 件を「${SHEET_ID}」に保存しました。\n3秒後にアプリを開きます…`,
+        "ok"
+      );
+
+      setTimeout(() => {
+        location.href = "index.html?sheet=" + encodeURIComponent(SHEET_ID) + "&restored=1";
+      }, 2500);
+    }
+
+    loadBackup()
+      .then((bundle) => {
+        const names = listZoneNames(bundle);
+        zoneListEl.innerHTML =
+          "<strong>復元される区画（" + names.length + "件）</strong><br>" +
+          names.map((n) => "・" + n).join("<br>");
+      })
+      .catch((err) => {
+        zoneListEl.textContent = "バックアップ読込失敗: " + (err.message || err);
+        btn.disabled = true;
+      });
+
+    btn.addEventListener("click", () => {
+      restore().catch((err) => {
+        showLog("エラー:\n" + (err.message || err), "err");
+        btn.disabled = false;
+      });
+    });
+  </script>
+</body>
+</html>

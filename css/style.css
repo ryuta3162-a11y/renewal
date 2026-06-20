@@ -700,6 +700,24 @@ body {
   padding-top: 0.65rem;
   border-top: 1px solid var(--border);
 }
+.marks-panel-hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.zone-mark-block {
+  margin-bottom: 0.45rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid var(--border);
+}
+.zone-mark-hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
 .marks-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
