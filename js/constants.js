@@ -82,7 +82,7 @@ export const DRAWINGS = [
 export const MACHINES_UI_ENABLED = false;
 
 /** 取り壊し・移動などの記号パーツ（区画とは別） */
-export const MARKS_UI_ENABLED = true;
+export const MARKS_UI_ENABLED = false;
 
 /** リニューアル検討用マーク — 図面上にクリック配置 */
 export const MARK_PARTS = [

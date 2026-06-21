@@ -6,11 +6,16 @@ import {
   listSavedPagesForSheet,
   designHasContent,
   writeSheetPages,
+  deleteSheetDesign,
+  clearLegacyAliasDesigns,
 } from "./storage.js";
 import { loadCustomZonePresets, saveCustomZonePresets } from "./zone-custom-presets.js";
+import { registerCustomSheetIfMissing } from "./projects.js";
 
 export const SHARE_FORMAT = "renewal-studio-share";
 export const SHARE_VERSION = 1;
+export const SHARE_SCOPE_SHEET = "sheet";
+export const SHARE_SCOPE_PROJECT = "project";
 
 /** 図面1件分のページデータを収集（localStorage から） */
 export function collectSheetPages(projectId, sheetId) {
@@ -26,6 +31,56 @@ export function collectSheetPages(projectId, sheetId) {
   return pages;
 }
 
+export function serializeSheetForShare(sheet) {
+  if (!sheet) return null;
+  return {
+    id: sheet.id,
+    name: sheet.name,
+    file: sheet.file,
+    kind: sheet.kind || "pdf",
+    pages: sheet.pages,
+    planWidthMm: sheet.planWidthMm,
+    planAreaM2: sheet.planAreaM2,
+    planAreaTsubo: sheet.planAreaTsubo,
+    isCustom: !!sheet.isCustom,
+    nameRoot: sheet.nameRoot,
+    insertAfterId: sheet.insertAfterId,
+  };
+}
+
+/** 案内の全図面で保存データがあるものを収集 */
+export function collectProjectSheetEntries(projectId, sheets) {
+  const entries = [];
+  (sheets || []).forEach((sheet) => {
+    const pages = collectSheetPages(projectId, sheet.id);
+    if (!Object.keys(pages).length) return;
+    entries.push({
+      sheet: serializeSheetForShare(sheet),
+      pages,
+    });
+  });
+  return entries;
+}
+
+export function isProjectShareBundle(data) {
+  return (
+    data?.scope === SHARE_SCOPE_PROJECT ||
+    (Array.isArray(data?.sheets) && data.sheets.length > 0)
+  );
+}
+
+export function normalizeProjectSheetEntries(sheets) {
+  if (Array.isArray(sheets)) {
+    return sheets
+      .map((entry) => ({
+        sheet: entry?.sheet || null,
+        pages: entry?.pages && typeof entry.pages === "object" ? entry.pages : {},
+      }))
+      .filter((e) => e.sheet?.id);
+  }
+  return [];
+}
+
 export function buildShareBundle({
   projectId,
   projectName,
@@ -38,6 +93,7 @@ export function buildShareBundle({
   return {
     format: SHARE_FORMAT,
     version: SHARE_VERSION,
+    scope: SHARE_SCOPE_SHEET,
     exportedAt: new Date().toISOString(),
     author: author.trim(),
     note: note.trim(),
@@ -61,9 +117,46 @@ export function buildShareBundle({
   };
 }
 
+export function buildProjectShareBundle({
+  projectId,
+  projectName,
+  sheets,
+  sheetEntries,
+  author = "",
+  note = "",
+}) {
+  const customZonePresets = loadCustomZonePresets();
+  return {
+    format: SHARE_FORMAT,
+    version: SHARE_VERSION,
+    scope: SHARE_SCOPE_PROJECT,
+    exportedAt: new Date().toISOString(),
+    author: author.trim(),
+    note: note.trim(),
+    projectId,
+    projectName,
+    sheets: sheetEntries,
+    sheetCatalog: (sheets || []).map((s) => serializeSheetForShare(s)).filter(Boolean),
+    extras: {
+      customZonePresets: customZonePresets.length
+        ? JSON.parse(JSON.stringify(customZonePresets))
+        : [],
+    },
+  };
+}
+
 export function validateShareBundle(data) {
   if (!data || typeof data !== "object") return "JSONの形式が正しくありません";
   if (data.format !== SHARE_FORMAT) return "Renewal Studio の書き出しファイルではありません";
+  if (isProjectShareBundle(data)) {
+    const entries = normalizeProjectSheetEntries(data.sheets);
+    if (!entries.length) return "図面データがありません";
+    const hasPage = entries.some((e) =>
+      Object.values(e.pages || {}).some((p) => designHasContent(p))
+    );
+    if (!hasPage) return "区画などのデータが空です";
+    return null;
+  }
   if (!data.sheet?.id) return "図面情報がありません";
   if (!data.pages || typeof data.pages !== "object") return "ページデータがありません";
   const hasPage = Object.values(data.pages).some((p) => designHasContent(p));
@@ -73,8 +166,18 @@ export function validateShareBundle(data) {
 
 /** バンドル内の区画数（pages 内 objects を集計） */
 export function countZonesInBundle(bundle) {
+  if (isProjectShareBundle(bundle)) {
+    return normalizeProjectSheetEntries(bundle.sheets).reduce(
+      (sum, entry) => sum + countZonesInSheetPages(entry.pages),
+      0
+    );
+  }
+  return countZonesInSheetPages(bundle?.pages);
+}
+
+function countZonesInSheetPages(pages) {
   let n = 0;
-  Object.values(bundle?.pages || {}).forEach((page) => {
+  Object.values(pages || {}).forEach((page) => {
     (page?.objects || []).forEach((o) => {
       if (o?.objectType === "zone" || o?.objectType === "fillArea") n++;
     });
@@ -82,16 +185,49 @@ export function countZonesInBundle(bundle) {
   return n;
 }
 
-function normalizePageCopy(pageData, bundle) {
+export function summarizeProjectBundle(bundle) {
+  const entries = normalizeProjectSheetEntries(bundle?.sheets);
+  const withZones = entries.filter((e) => countZonesInSheetPages(e.pages) > 0);
+  return {
+    sheetCount: entries.length,
+    sheetsWithData: withZones.length,
+    zoneCount: countZonesInBundle(bundle),
+    names: entries.map((e) => e.sheet.name || e.sheet.id),
+  };
+}
+
+function normalizePageCopy(pageData, sheetMeta) {
   const copy = JSON.parse(JSON.stringify(pageData));
-  if (copy._sheetMeta) {
+  if (copy._sheetMeta && sheetMeta) {
     copy._sheetMeta = {
       ...copy._sheetMeta,
-      name: copy._sheetMeta.name || bundle.sheet?.name,
-      file: copy._sheetMeta.file || bundle.sheet?.file,
+      name: copy._sheetMeta.name || sheetMeta.name,
+      file: copy._sheetMeta.file || sheetMeta.file,
     };
   }
   return copy;
+}
+
+function mergeCustomZonePresetsFromBundle(bundle) {
+  const incoming = bundle.extras?.customZonePresets;
+  if (!incoming?.length) return false;
+  const existing = loadCustomZonePresets();
+  const names = new Set(existing.map((p) => p.name));
+  const merged = [...existing];
+  incoming.forEach((p) => {
+    if (!p?.name || names.has(p.name)) return;
+    merged.push({
+      ...p,
+      id: p.id?.startsWith("custom-") ? p.id : "custom-" + crypto.randomUUID(),
+      isCustom: true,
+    });
+    names.add(p.name);
+  });
+  if (merged.length > existing.length) {
+    saveCustomZonePresets(merged);
+    return true;
+  }
+  return false;
 }
 
 /** 受け取ったバンドルをストレージへ書き込み（既存キーは上書き） */
@@ -100,7 +236,7 @@ export function applyShareBundle(bundle, targetProjectId, targetSheetId, retryOp
   Object.entries(bundle.pages).forEach(([pageStr, pageData]) => {
     const page = parseInt(pageStr, 10);
     if (!Number.isFinite(page) || page < 1 || !pageData) return;
-    pages[pageStr] = normalizePageCopy(pageData, bundle);
+    pages[pageStr] = normalizePageCopy(pageData, bundle.sheet);
   });
 
   if (retryOpts.validSheetIds?.length) {
@@ -112,24 +248,45 @@ export function applyShareBundle(bundle, targetProjectId, targetSheetId, retryOp
     });
   }
 
-  const incoming = bundle.extras?.customZonePresets;
-  if (incoming?.length) {
-    const existing = loadCustomZonePresets();
-    const names = new Set(existing.map((p) => p.name));
-    const merged = [...existing];
-    incoming.forEach((p) => {
-      if (!p?.name || names.has(p.name)) return;
-      merged.push({
-        ...p,
-        id: p.id?.startsWith("custom-") ? p.id : "custom-" + crypto.randomUUID(),
-        isCustom: true,
-      });
-      names.add(p.name);
-    });
-    if (merged.length > existing.length) saveCustomZonePresets(merged);
-  }
+  mergeCustomZonePresetsFromBundle(bundle);
 
   return { projectId: targetProjectId, sheetId: targetSheetId };
+}
+
+/** 全図面バンドルを一括インポート */
+export function applyProjectShareBundle(bundle, targetProjectId, sheets, retryOpts = {}) {
+  const entries = normalizeProjectSheetEntries(bundle.sheets);
+  const applied = [];
+  const skipped = [];
+
+  entries.forEach((entry) => {
+    const sheetMeta = entry.sheet;
+    registerCustomSheetIfMissing(targetProjectId, sheetMeta);
+
+    const miniBundle = {
+      sheet: sheetMeta,
+      pages: entry.pages,
+      extras: bundle.extras,
+    };
+    const targetSheetId = resolveImportSheetId(miniBundle, sheets, null);
+    if (!targetSheetId) {
+      skipped.push(sheetMeta.name || sheetMeta.id);
+      return;
+    }
+
+    deleteSheetDesign(targetProjectId, targetSheetId);
+    clearLegacyAliasDesigns(targetProjectId, targetSheetId);
+    applyShareBundle(miniBundle, targetProjectId, targetSheetId, retryOpts);
+    applied.push({
+      sheetId: targetSheetId,
+      name: sheetMeta.name || sheetMeta.id,
+      zones: countZonesInSheetPages(entry.pages),
+    });
+  });
+
+  mergeCustomZonePresetsFromBundle(bundle);
+
+  return { applied, skipped };
 }
 
 /** インポート先の図面 id を決める */
@@ -144,6 +301,13 @@ export function resolveImportSheetId(bundle, sheets, fallbackSheetId) {
 }
 
 export function shareBundleFilename(bundle) {
+  if (isProjectShareBundle(bundle)) {
+    const proj = (bundle.projectName || bundle.projectId || "project")
+      .replace(/[<>:"/\\|?*]/g, "_")
+      .slice(0, 24);
+    const d = (bundle.exportedAt || "").slice(0, 10);
+    return `renewal-${proj}-全図面-${d || "export"}.json`;
+  }
   const name = (bundle.sheet?.name || bundle.sheet?.id || "drawing")
     .replace(/[<>:"/\\|?*]/g, "_")
     .slice(0, 40);

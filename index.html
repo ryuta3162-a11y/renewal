@@ -51,8 +51,9 @@
         <button class="btn btn-ghost btn-sm" id="btn-zoom-fit">全体</button>
         <button class="btn btn-ghost btn-sm" id="btn-zoom-in">＋</button>
         <button class="btn btn-ghost btn-sm" id="btn-undo">↩</button>
-        <button class="btn btn-ghost btn-sm" id="btn-export-json" title="区画データをJSONで書き出し（バトンリレー用）">JSON</button>
-        <button class="btn btn-ghost btn-sm" id="btn-import-json" title="今開いている図面にJSONを読み込む">読込</button>
+        <button class="btn btn-ghost btn-sm" id="btn-export-json" title="今開いている図面だけJSONで書き出し">JSON</button>
+        <button class="btn btn-ghost btn-sm" id="btn-export-json-all" title="案内の全図面データを1つのJSONに書き出し">全JSON</button>
+        <button class="btn btn-ghost btn-sm" id="btn-import-json" title="JSONを読み込む（1図面 or 全図面）">読込</button>
         <input type="file" id="import-json-input" accept="application/json,.json" hidden />
         <button class="btn btn-primary btn-sm" id="btn-save">保存</button>
         <button class="btn btn-primary btn-sm" id="btn-export">PNG</button>
@@ -62,31 +63,30 @@
     <div class="workspace" id="workspace">
       <aside class="palette-panel zone-sidebar" id="zone-sidebar">
         <div class="zone-sidebar-inner">
-        <div class="panel-header-row">
-          <div class="panel-title">区分</div>
-          <div class="hook-toolbar">
-            <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-expand-all" title="展開">＋</button>
-            <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-collapse-all" title="折畳">−</button>
-            <button type="button" class="btn btn-ghost btn-xs zone-sidebar-close" id="btn-zone-sidebar-close" title="隠す">×</button>
-          </div>
-        </div>
-        <div class="zone-custom-section">
+        <div class="zone-sidebar-head">
           <div class="panel-header-row">
-            <span class="panel-title sub">自作</span>
-            <button type="button" class="btn btn-primary btn-xs" id="btn-add-zone-preset">＋ 追加</button>
+            <div class="panel-title">区分</div>
+            <div class="hook-toolbar">
+              <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-expand-all" title="展開">＋</button>
+              <button type="button" class="btn btn-ghost btn-xs" id="btn-hooks-collapse-all" title="折畳">−</button>
+              <button type="button" class="btn btn-ghost btn-xs zone-sidebar-close" id="btn-zone-sidebar-close" title="隠す">×</button>
+            </div>
           </div>
-          <div id="zone-custom-hooks" class="zone-hooks zone-hooks-compact"></div>
         </div>
-        <div class="zone-hooks-divider"><span>標準区分</span></div>
-        <div id="zone-hooks" class="zone-hooks"></div>
-        <div class="marks-panel" id="marks-panel">
-          <div class="panel-header-row">
-            <span class="panel-title sub">記号</span>
-          </div>
-          <p class="marks-panel-hint">区画確定後、記号を選んで区画をクリック → 右上にバッジが付きます</p>
-          <div id="marks-palette" class="marks-grid"></div>
+        <div class="zone-hooks-scroll">
+          <section class="zone-custom-section">
+            <div class="panel-header-row">
+              <span class="panel-title sub">自作</span>
+              <button type="button" class="btn btn-primary btn-xs" id="btn-add-zone-preset">＋ 追加</button>
+            </div>
+            <div id="zone-custom-hooks" class="zone-hooks zone-hooks-compact"></div>
+          </section>
+          <div class="zone-hooks-divider"><span>標準区分</span></div>
+          <div id="zone-hooks" class="zone-hooks zone-hooks-standard"></div>
         </div>
-        <button class="btn btn-danger btn-block" id="btn-clear-zones">区画クリア</button>
+        <div class="zone-sidebar-foot">
+          <button class="btn btn-danger btn-block" id="btn-clear-zones">区画クリア</button>
+        </div>
         </div>
         <div class="zone-sidebar-resizer" id="zone-sidebar-resizer" title="ドラッグで幅を変更"></div>
       </aside>

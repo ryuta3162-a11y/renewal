@@ -311,6 +311,36 @@ export function recoverCustomSheetsFromDesigns(projectId) {
   return recovered;
 }
 
+/** 全図面JSONインポート時 — 複製図面が一覧に無ければ登録 */
+export function registerCustomSheetIfMissing(projectId, sheet) {
+  if (!sheet?.isCustom || !sheet.id) return false;
+  const map = loadCustomSheetsMap();
+  const list = map[projectId] || [];
+  if (list.some((s) => s.id === sheet.id)) return false;
+  list.push({
+    id: sheet.id,
+    name: sheet.name,
+    file: sheet.file,
+    kind: sheet.kind || "pdf",
+    pages: sheet.pages,
+    planWidthMm: sheet.planWidthMm,
+    scaleHints: sheet.scaleHints,
+    planAreaM2: sheet.planAreaM2,
+    planAreaTsubo: sheet.planAreaTsubo,
+    isCustom: true,
+    nameRoot: sheet.nameRoot || sheet.name,
+    insertAfterId: sheet.insertAfterId,
+  });
+  map[projectId] = list;
+  try {
+    saveCustomSheetsMap(map);
+    return true;
+  } catch (err) {
+    console.error("registerCustomSheetIfMissing failed:", err);
+    return false;
+  }
+}
+
 export function addImportedProposal({ name, author, sheets }) {
   const list = loadImportedProposals();
   const entry = {

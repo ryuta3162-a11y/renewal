@@ -10,7 +10,7 @@
   --danger: #ef4444;
   --canvas-bg: #374151;
   --memo-glow: #fbbf24;
-  --zone-sidebar-width: 220px;
+  --zone-sidebar-width: 240px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -92,6 +92,8 @@ body {
   position: relative;
   padding: 0 !important;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   width: var(--zone-sidebar-width);
   overflow: hidden;
 }
@@ -106,10 +108,42 @@ body {
 .zone-sidebar-inner {
   flex: 1;
   min-width: 0;
-  padding: 0.75rem;
-  overflow-y: auto;
+  min-height: 0;
+  height: 100%;
+  padding: 0.65rem 0.75rem;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+  gap: 0.45rem;
+}
+.zone-sidebar-head {
+  flex-shrink: 0;
+}
+.zone-hooks-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-right: 0.15rem;
+  scrollbar-gutter: stable;
+}
+.zone-hooks-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.zone-hooks-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.zone-hooks-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+.zone-sidebar-foot {
+  flex-shrink: 0;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
 }
 .zone-sidebar-resizer {
   flex-shrink: 0;
@@ -166,9 +200,10 @@ body {
 .panel-title.sub { font-size: 0.72rem; color: var(--muted); }
 
 .zone-custom-section {
-  margin-bottom: 0.5rem;
-  padding-bottom: 0.45rem;
-  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  margin-bottom: 0;
+  padding-bottom: 0.15rem;
+  border-bottom: none;
 }
 
 .scale-panel {
@@ -361,7 +396,8 @@ body {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin: 0.35rem 0 0.45rem;
+  margin: 0.15rem 0 0.1rem;
+  flex-shrink: 0;
   font-size: 0.62rem;
   color: var(--muted);
   letter-spacing: 0.04em;
@@ -397,13 +433,14 @@ body {
 }
 
 .zone-hooks {
-  flex: 1;
-  overflow-y: auto;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  margin-bottom: 0.5rem;
-  min-height: 0;
+  margin-bottom: 0.25rem;
+}
+.zone-hooks-standard {
+  padding-bottom: 0.35rem;
 }
 
 .zone-hook {
@@ -811,7 +848,8 @@ body {
 .btn-ghost:hover { background: var(--border); }
 .btn-ghost:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-danger { background: var(--danger); color: white; }
-.btn-block { width: 100%; margin-top: 0.5rem; }
+.btn-block { width: 100%; margin-top: 0; }
+.zone-sidebar-foot .btn-block { margin-top: 0; }
 
 /* Workspace */
 .palette-panel, .props-panel {

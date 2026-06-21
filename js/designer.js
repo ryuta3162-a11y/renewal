@@ -9,6 +9,7 @@ import {
   deleteProjectSheet,
   isCustomSheet,
   recoverCustomSheetsFromDesigns,
+  registerCustomSheetIfMissing,
 } from "./projects.js";
 import {
   snapPoint,
@@ -99,7 +100,14 @@ import {
 import {
   collectSheetPages,
   buildShareBundle,
+  buildProjectShareBundle,
+  collectProjectSheetEntries,
   applyShareBundle,
+  applyProjectShareBundle,
+  isProjectShareBundle,
+  summarizeProjectBundle,
+  serializeSheetForShare,
+  normalizeProjectSheetEntries,
   downloadShareBundle,
   readShareBundleFile,
   normalizeImportedJson,
@@ -4127,6 +4135,7 @@ function exportPng() {
 
 function setupShareExport() {
   document.getElementById("btn-export-json")?.addEventListener("click", exportShareJson);
+  document.getElementById("btn-export-json-all")?.addEventListener("click", exportAllShareJson);
   const fileInput = document.getElementById("import-json-input");
   document.getElementById("btn-import-json")?.addEventListener("click", () => {
     fileInput?.click();
@@ -4187,6 +4196,72 @@ function exportShareJson() {
 
   downloadShareBundle(bundle);
   flashStatus(`「${sheet.name}」をJSONで書き出しました（バトンリレー用）`);
+}
+
+function exportAllShareJson() {
+  persistCurrent();
+  const sheets = getProjectSheets(currentProjectId);
+  let entries = collectProjectSheetEntries(currentProjectId, sheets);
+
+  if (currentDrawingId) {
+    const hasCurrent = entries.some((e) => e.sheet.id === currentDrawingId);
+    if (!hasCurrent) {
+      const sheet = getCurrentSheet(currentDrawingId);
+      if (sheet) {
+        const live = {
+          objects: getUserObjects().map((o) => o.toObject(getSerializeProps())),
+          viewport: canvas.viewportTransform?.slice() ?? [1, 0, 0, 1, 0, 0],
+          mmPerImagePx: currentMmPerImagePx,
+          scaleCalibrated,
+          scaleCalibSummary,
+          scaleHudMinimized,
+          workBoundaryCanvasPoints: getWorkBoundaryPoints(),
+          drawingTransform: drawingImage
+            ? {
+                left: drawingImage.left,
+                top: drawingImage.top,
+                scaleX: drawingImage.scaleX,
+                scaleY: drawingImage.scaleY,
+              }
+            : null,
+        };
+        if (designHasContent(live)) {
+          entries = [
+            ...entries,
+            {
+              sheet: serializeSheetForShare(sheet),
+              pages: { [String(currentPage)]: JSON.parse(JSON.stringify(live)) },
+            },
+          ];
+        }
+      }
+    }
+  }
+
+  if (!entries.length) {
+    flashStatus("書き出すデータがありません（いずれかの図面に区画などを追加してください）");
+    return;
+  }
+
+  const note = window.prompt("メモ（任意・受け取り用）", "") ?? "";
+  const author = window.prompt("作成者名（任意）", "") ?? "";
+  const projName =
+    document.getElementById("project-select")?.selectedOptions[0]?.textContent?.trim() || "原本";
+
+  const bundle = buildProjectShareBundle({
+    projectId: currentProjectId,
+    projectName: projName,
+    sheets,
+    sheetEntries: entries,
+    author,
+    note,
+  });
+
+  downloadShareBundle(bundle);
+  const summary = summarizeProjectBundle(bundle);
+  flashStatus(
+    `全図面JSONを書き出しました（${summary.sheetsWithData}図面・区画 ${summary.zoneCount} 件）`
+  );
 }
 
 function countZonesOnCanvas() {
@@ -4306,12 +4381,90 @@ async function importShareJson(file) {
   try {
     const raw = await readShareBundleFile(file);
     const bundle = normalizeImportedJson(raw);
-    await applyShareBundleToCurrentSheet(bundle);
+    if (isProjectShareBundle(bundle)) {
+      await applyProjectShareBundleToStudio(bundle);
+    } else {
+      await applyShareBundleToCurrentSheet(bundle);
+    }
   } catch (err) {
     setStatusError(`読み込み失敗: ${err?.message || err}`);
     alert(`読み込み失敗:\n${err?.message || err}`);
     console.error(err);
   }
+}
+
+async function applyProjectShareBundleToStudio(bundle) {
+  if (!discardPendingPlacementIfNeeded("全図面データを読み込む")) return false;
+
+  const err = validateShareBundle(bundle);
+  if (err) {
+    setStatusError(err);
+    alert(`読み込みできませんでした:\n${err}`);
+    return false;
+  }
+
+  const summary = summarizeProjectBundle(bundle);
+  const listPreview = summary.names.slice(0, 8).join("、");
+  const more = summary.names.length > 8 ? ` ほか ${summary.names.length - 8} 件` : "";
+  const projName =
+    document.getElementById("project-select")?.selectedOptions[0]?.textContent?.trim() || "原本";
+
+  const ok = confirm(
+    `${bundle.author ? `${bundle.author}さんの` : ""}全図面データ（${summary.sheetsWithData} 図面・区画 ${summary.zoneCount} 件）を\n` +
+      `「${projName}」に読み込みます。\n\n` +
+      `対象: ${listPreview}${more}\n\n` +
+      `※ 同名の図面の保存データは上書きされます。よろしいですか？`
+  );
+  if (!ok) return false;
+
+  cancelPendingAutoSave();
+
+  normalizeProjectSheetEntries(bundle.sheets).forEach((entry) => {
+    registerCustomSheetIfMissing(currentProjectId, entry.sheet);
+  });
+  rebuildSheetSelect();
+
+  const sheets = getProjectSheets(currentProjectId);
+  let result;
+  try {
+    result = applyProjectShareBundle(bundle, currentProjectId, sheets, storageRetryOpts(currentProjectId));
+  } catch (saveErr) {
+    const msg = saveErr?.message || String(saveErr);
+    setStatusError(`保存失敗: ${msg}`);
+    alert(`保存に失敗しました:\n${msg}`);
+    return false;
+  }
+
+  await flushStorage();
+
+  if (bundle.extras?.customZonePresets?.length) buildZoneHooks();
+
+  const reloadId =
+    currentDrawingId && sheets.some((s) => s.id === currentDrawingId)
+      ? currentDrawingId
+      : result.applied[0]?.sheetId || sheets[0]?.id;
+
+  if (reloadId) {
+    currentPage = 1;
+    await loadDrawing(reloadId);
+    syncDrawingSelectValue();
+  }
+
+  const skippedNote = result.skipped.length
+    ? `\n\n読み込めなかった図面: ${result.skipped.join("、")}`
+    : "";
+  const from = bundle.author ? `${bundle.author}さんの` : "";
+  const note = bundle.note ? ` — ${bundle.note}` : "";
+
+  flashStatus(
+    `${from}全図面データを読み込みました（${result.applied.length} 図面・区画 ${summary.zoneCount} 件）${note}`
+  );
+  alert(
+    `読み込み完了\n\n` +
+      `${result.applied.length} 件の図面にデータを復元しました。\n` +
+      `図面プルダウンから各図面を開いて確認してください。${skippedNote}`
+  );
+  return true;
 }
 
 // ── Keyboard nudge (arrow keys) ───────────────────
