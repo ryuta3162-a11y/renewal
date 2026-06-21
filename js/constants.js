@@ -14,11 +14,12 @@ export const KYODO_SCALE_HINTS = [
 
 /** 旧ファイル名 → 現在の drawings 内の実ファイル */
 export const DRAWING_FILE_ALIASES = {
-  "/drawings/kushita-1.pdf": "/drawings/日下　入口.pdf",
+  "/drawings/kushita-1.pdf": "/drawings/日下　2F.pdf",
   "/drawings/kushita-2.pdf": "/drawings/日下　2F.pdf",
   "/drawings/kushita-3.pdf": "/drawings/日下　3F.pdf",
   "/drawings/mito.pdf": "/drawings/みと　まとめ.pdf",
-  "/drawings/日下①.pdf": "/drawings/日下　入口.pdf",
+  "/drawings/日下①.pdf": "/drawings/日下　2F.pdf",
+  "/drawings/日下　入口.pdf": "/drawings/日下　2F.pdf",
   "/drawings/日下②.pdf": "/drawings/日下　2F.pdf",
   "/drawings/日下③.pdf": "/drawings/日下　3F.pdf",
   "/drawings/日下 3F.pdf": "/drawings/日下　3F.pdf",
@@ -38,7 +39,8 @@ export const DRAWING_FILE_ALIASES = {
 
 /** 旧 id → 新 id（保存データの引き継ぎ用） */
 export const DRAWING_ID_ALIASES = {
-  "kushita-1": "日下①",
+  "kushita-1": "日下②",
+  "日下①": "日下②",
   "kushita-2": "日下②",
   "kushita-3": "日下③",
   mito: "みと①",
@@ -71,8 +73,7 @@ export const DRAWINGS = [
   { id: "kyodo-8", name: "経堂原本　2F", file: "/drawings/経堂原本　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "kyodo-9", name: "経堂原本　3F", file: "/drawings/経堂原本　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "みと①", name: "みと　まとめ", file: "/drawings/みと　まとめ.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "日下①", name: "日下　入口", file: "/drawings/日下　入口.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
-  { id: "日下②", name: "日下　2F", file: "/drawings/日下　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
+  { id: "日下②", name: "日下　2F", file: "/drawings/日下　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "日下③", name: "日下　3F", file: "/drawings/日下　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "gyotoku-1", name: "行徳　2F", file: "/drawings/行徳　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "gyotoku-2", name: "行徳　3F", file: "/drawings/行徳　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },

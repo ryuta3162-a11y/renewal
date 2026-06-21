@@ -134,6 +134,11 @@ import {
   createPartBox,
   refreshMarkPartDisplay,
 } from "./objects.js";
+import {
+  createCanvasLabel,
+  upgradeCanvasLabel,
+  bringCanvasLabelsToFront,
+} from "./canvas-label.js";
 
 const canvasWrap = document.getElementById("canvas-wrap");
 const statusEl = document.getElementById("status");
@@ -453,6 +458,9 @@ function initCanvas() {
       }
     }
     if (e.target) applyInteractiveControls(e.target);
+    if (e.target?.objectType && e.target.objectType !== "drawing") {
+      bringCanvasLabelsToFront(canvas, drawingImage);
+    }
     pushHistory();
     updateProps();
     scheduleAutoSave();
@@ -460,6 +468,9 @@ function initCanvas() {
   canvas.on("object:added", (e) => {
     if (drawingImage && e.target && e.target !== drawingImage) {
       drawingImage.sendToBack();
+    }
+    if (e.target?.objectType && e.target.objectType !== "drawing") {
+      bringCanvasLabelsToFront(canvas, drawingImage);
     }
     if (e.target?.objectType === "zone") refreshZoneHooksList();
     if (!isRestoringHistory && !e.target?._skipHistory) {
@@ -581,6 +592,9 @@ function initCanvas() {
   canvas.on("mouse:move", onCanvasMouseMove);
   canvas.on("mouse:up", onCanvasMouseUp);
   canvas.on("mouse:dblclick", onCanvasDoubleClick);
+  canvas.on("text:changed", () => {
+    scheduleAutoSave();
+  });
 
   const blockContextMenu = (e) => {
     e.preventDefault();
@@ -3077,6 +3091,17 @@ function handleCanvasRightClick(opt) {
   if (active && deleteObjectOnRightClick(active)) return;
 }
 
+function placeCanvasLabel(x, y) {
+  const label = createCanvasLabel("テキスト", x, y);
+  canvas.add(label);
+  bringCanvasLabelsToFront(canvas, drawingImage);
+  canvas.setActiveObject(label);
+  applyInteractiveControls(label);
+  label.enterEditing();
+  canvas.requestRenderAll();
+  updateProps();
+}
+
 function onCanvasMouseDown(opt) {
   const e = opt.e;
 
@@ -3095,6 +3120,12 @@ function onCanvasMouseDown(opt) {
   if (zoneVertexEditCleanup) return;
 
   if (activeTool === "zone") return;
+
+  if (activeTool === "text" && e.button === 0) {
+    const ptr = canvas.getPointer(e);
+    placeCanvasLabel(ptr.x, ptr.y);
+    return;
+  }
 
   if (allowsMarkPlacement() && pendingPart) {
     let zone = null;
@@ -3445,6 +3476,8 @@ function setTool(tool) {
     startDrawingAdjustMode();
   } else if (tool === "place" && canPlaceParts()) {
     canvas.skipTargetFind = false;
+  } else if (tool === "text") {
+    canvas.skipTargetFind = false;
   } else if (tool === "pan") {
     canvas.skipTargetFind = true;
   } else {
@@ -3469,6 +3502,10 @@ function updateCanvasCursor() {
   }
   if (activeTool === "zone") {
     canvas.setCursor("crosshair");
+    return;
+  }
+  if (activeTool === "text") {
+    canvas.setCursor("text");
     return;
   }
   if (activeTool === "drawing") {
@@ -3550,6 +3587,15 @@ function applyPropToSelection(field) {
     return;
   }
 
+  if (obj.objectType === "canvasLabel") {
+    if (field === "label") {
+      obj.set("text", document.getElementById("prop-label").value);
+      canvas.requestRenderAll();
+      scheduleAutoSave();
+    }
+    return;
+  }
+
   if (obj.objectType !== "part") return;
 
   if (field === "label") {
@@ -3603,6 +3649,7 @@ function propsTargetKey(obj) {
   }
   if (obj.objectType === "drawing") return "drawing";
   if (obj.objectType === "memo") return `memo:${obj.memoData?.id || ""}:${obj.left}:${obj.top}`;
+  if (obj.objectType === "canvasLabel") return `canvasLabel:${obj.left}:${obj.top}:${obj.text || ""}`;
   if (obj.objectType === "part") {
     return `part:${obj.partId || ""}:${obj.partMarkRole || ""}:${obj.partMarkIndex || ""}`;
   }
@@ -3983,6 +4030,20 @@ function updateProps() {
     return;
   }
 
+  if (obj.objectType === "canvasLabel") {
+    lastPropsTargetKey = propsTargetKey(obj);
+    form.hidden = false;
+    content.innerHTML = `<p class="prop-meta">図面上のテキスト（ダブルクリックでも編集）</p>`;
+    document.getElementById("prop-label").closest(".prop-field").hidden = false;
+    document.querySelectorAll("#props-form .prop-row").forEach((row) => {
+      row.hidden = true;
+    });
+    document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
+    if (memoField) memoField.hidden = true;
+    setInputValueIfIdle(document.getElementById("prop-label"), obj.text || "");
+    return;
+  }
+
   form.hidden = true;
   content.innerHTML = `
     <p class="prop-type">${obj.type}</p>
@@ -4013,12 +4074,16 @@ function undo() {
       if (o.objectType === "fillArea" || o.objectType === "zone") {
         upgradeZoneObject(o);
         applyInteractiveControls(o);
+      } else if (o.objectType === "canvasLabel") {
+        upgradeCanvasLabel(o);
+        applyInteractiveControls(o);
       } else {
         upgradePartGroup(o);
       }
       canvas.add(o);
     });
     if (drawingImage) drawingImage.sendToBack();
+    bringCanvasLabelsToFront(canvas, drawingImage);
     canvas.requestRenderAll();
     applyMachinesVisibility();
     refreshZoneHooksList();
@@ -4083,6 +4148,9 @@ function restoreDesign(key, data = loadDesign(key), opts = {}) {
           if (o.objectType === "fillArea" || o.objectType === "zone") {
             upgradeZoneObject(o);
             applyInteractiveControls(o);
+          } else if (o.objectType === "canvasLabel") {
+            upgradeCanvasLabel(o);
+            applyInteractiveControls(o);
           } else {
             upgradePartGroup(o);
           }
@@ -4092,6 +4160,7 @@ function restoreDesign(key, data = loadDesign(key), opts = {}) {
         }
       });
       if (drawingImage) drawingImage.sendToBack();
+      bringCanvasLabelsToFront(canvas, drawingImage);
       canvas.requestRenderAll();
       applyMachinesVisibility();
       refreshZoneHooksList();
@@ -4671,6 +4740,7 @@ function pasteClipboardObject() {
 function setupKeyboard() {
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select")) return;
+    if (canvas?.getActiveObject()?.isEditing) return;
 
     if (scaleCalibCleanup || scaleCalibPendingPoints) {
       if (e.key === "Escape") {
@@ -4693,6 +4763,12 @@ function setupKeyboard() {
       }
     }
 
+    if (e.key === "Escape" && activeTool === "text") {
+      e.preventDefault();
+      setTool("select");
+      return;
+    }
+
     if (e.key === "Escape" && activeTool === "drawing") {
       e.preventDefault();
       setTool("select");
@@ -4711,6 +4787,7 @@ function setupKeyboard() {
       updateCanvasCursor();
     }
     if (e.key === "Delete" || (e.key === "Backspace" && activeTool === "select")) {
+      if (canvas.getActiveObject()?.isEditing) return;
       e.preventDefault();
       deleteSelected();
     }
@@ -4737,6 +4814,7 @@ function setupKeyboard() {
     if (e.key === "z" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
     else if (e.key === "z" || e.key === "Z") setTool("zone");
     if (e.key === "v" || e.key === "V") setTool("select");
+    if (e.key === "t" || e.key === "T") setTool("text");
     if (e.key === "d" || e.key === "D") setTool("drawing");
     if (e.key === "h" || e.key === "H") setTool("pan");
     handleArrowKeyDown(e);
