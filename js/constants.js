@@ -12,6 +12,9 @@ export const KYODO_SCALE_HINTS = [
   { label: "境界 29890", mm: 29890, tip: "隣地境界線の長さ" },
 ];
 
+/** bump when drawings/*.pdf bytes change (CDN/ブラウザキャッシュ回避) */
+export const DRAWING_ASSET_VERSION = 4;
+
 /** 旧ファイル名 → 現在の drawings 内の実ファイル */
 export const DRAWING_FILE_ALIASES = {
   "/drawings/kushita-1.pdf": "/drawings/日下　2F.pdf",
@@ -62,9 +65,10 @@ export function resolveDrawingUrl(file) {
   const encoded =
     i < 0 ? encodeURI(path) : path.slice(0, i + 1) + encodeURIComponent(path.slice(i + 1));
   if (typeof window !== "undefined" && window.location?.origin) {
-    return new URL(encoded, window.location.origin).href;
+    const href = new URL(encoded, window.location.origin).href;
+    return `${href}${href.includes("?") ? "&" : "?"}v=${DRAWING_ASSET_VERSION}`;
   }
-  return encoded;
+  return `${encoded}${encoded.includes("?") ? "&" : "?"}v=${DRAWING_ASSET_VERSION}`;
 }
 
 /** 同一PDF判定用（エイリアス解決後のパス） */
@@ -81,8 +85,8 @@ export const DRAWINGS = [
   { id: "石田-2F", name: "石田　2F", file: "/drawings/石田　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "石田-3F", name: "石田　3F", file: "/drawings/石田　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "みと①", name: "みと　まとめ", file: "/drawings/みと　まとめ.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "みと-2F", name: "みと　2F", file: "/drawings/みと　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "みと-3F", name: "みと　3F", file: "/drawings/みと　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "みと-2F", name: "みと　2F", file: "/drawings/みと　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
+  { id: "みと-3F", name: "みと　3F", file: "/drawings/みと　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "日下②", name: "日下　2F", file: "/drawings/日下　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "日下③", name: "日下　3F", file: "/drawings/日下　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "gyotoku-1", name: "行徳　2F", file: "/drawings/行徳　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
