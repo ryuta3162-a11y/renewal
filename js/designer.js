@@ -139,6 +139,11 @@ import {
   upgradeCanvasLabel,
   bringCanvasLabelsToFront,
   isFabricTextEditing,
+  getCanvasLabelMain,
+  getCanvasLabelMainText,
+  layoutCanvasLabelGroup,
+  setCanvasLabelMemo,
+  setCanvasLabelFontSize,
   CANVAS_LABEL_FONT_SIZE,
   CANVAS_LABEL_FONT_SIZES,
 } from "./canvas-label.js";
@@ -597,10 +602,23 @@ function initCanvas() {
   canvas.on("mouse:move", onCanvasMouseMove);
   canvas.on("mouse:up", onCanvasMouseUp);
   canvas.on("mouse:dblclick", onCanvasDoubleClick);
-  canvas.on("text:changed", () => {
+  canvas.on("text:changed", (e) => {
+    const t = e.target;
+    if (t?.canvasLabelRole === "main") {
+      const group = t.group?.objectType === "canvasLabel" ? t.group : null;
+      if (group) {
+        layoutCanvasLabelGroup(group);
+        canvas.requestRenderAll();
+      }
+    }
     scheduleAutoSave();
   });
-  canvas.on("text:editing:exited", () => {
+  canvas.on("text:editing:exited", (e) => {
+    const t = e.target;
+    if (t?.canvasLabelRole === "main" && t.group?.objectType === "canvasLabel") {
+      layoutCanvasLabelGroup(t.group);
+      canvas.setActiveObject(t.group);
+    }
     updateProps();
     scheduleAutoSave();
   });
@@ -3106,7 +3124,11 @@ function placeCanvasLabel(x, y) {
   bringCanvasLabelsToFront(canvas, drawingImage);
   canvas.setActiveObject(label);
   applyInteractiveControls(label);
-  label.enterEditing();
+  const main = getCanvasLabelMain(label);
+  if (main) {
+    canvas.setActiveObject(main);
+    main.enterEditing();
+  }
   canvas.requestRenderAll();
   updateProps();
 }
@@ -3580,6 +3602,11 @@ function hideCanvasLabelFontSizeField() {
   if (field) field.hidden = true;
 }
 
+function hideCanvasLabelMemoField() {
+  const field = document.getElementById("prop-canvas-label-memo-field");
+  if (field) field.hidden = true;
+}
+
 function setupPropsForm() {
   setupCanvasLabelFontSizeSelect();
   const bind = (id, fn) => document.getElementById(id)?.addEventListener("input", fn);
@@ -3605,6 +3632,7 @@ function setupPropsForm() {
     }
   });
   bind("prop-zone-memo", () => applyPropToSelection("memo"));
+  bind("prop-canvas-label-memo", () => applyPropToSelection("canvasLabelMemo"));
   bind("prop-width", () => applyPropToSelection("width"));
   bind("prop-height", () => applyPropToSelection("height"));
   bind("prop-mm-w", () => applyPropToSelection("mmW"));
@@ -3614,8 +3642,17 @@ function setupPropsForm() {
   bind("prop-rotation", () => applyPropToSelection("rotation"));
 }
 
+function resolveCanvasLabelTarget(obj) {
+  if (!obj) return null;
+  if (obj.objectType === "canvasLabel") return obj;
+  if (obj.canvasLabelRole && obj.group?.objectType === "canvasLabel") return obj.group;
+  return null;
+}
+
 function applyPropToSelection(field) {
-  const obj = canvas.getActiveObject();
+  let obj = canvas.getActiveObject();
+  const canvasLabel = resolveCanvasLabelTarget(obj);
+  if (canvasLabel) obj = canvasLabel;
   if (!obj) return;
 
   if (obj.objectType === "zone" || obj.objectType === "fillArea") {
@@ -3636,16 +3673,15 @@ function applyPropToSelection(field) {
   }
 
   if (obj.objectType === "canvasLabel") {
-    if (field === "label") {
-      obj.set("text", document.getElementById("prop-label").value);
+    if (field === "canvasLabelMemo") {
+      setCanvasLabelMemo(obj, document.getElementById("prop-canvas-label-memo").value);
       canvas.requestRenderAll();
       scheduleAutoSave();
     }
     if (field === "fontSize") {
       const size = Number(document.getElementById("prop-label-font-size").value);
       if (size > 0) {
-        obj.set({ fontSize: size });
-        obj.setCoords();
+        setCanvasLabelFontSize(obj, size);
         pendingCanvasLabelFontSize = size;
         canvas.requestRenderAll();
         scheduleAutoSave();
@@ -3707,7 +3743,7 @@ function propsTargetKey(obj) {
   }
   if (obj.objectType === "drawing") return "drawing";
   if (obj.objectType === "memo") return `memo:${obj.memoData?.id || ""}:${obj.left}:${obj.top}`;
-  if (obj.objectType === "canvasLabel") return `canvasLabel:${obj.left}:${obj.top}:${obj.text || ""}`;
+  if (obj.objectType === "canvasLabel") return `canvasLabel:${obj.left}:${obj.top}:${getCanvasLabelMainText(obj)}:${obj.canvasLabelMemo || ""}`;
   if (obj.objectType === "part") {
     return `part:${obj.partId || ""}:${obj.partMarkRole || ""}:${obj.partMarkIndex || ""}`;
   }
@@ -3831,12 +3867,15 @@ function bindZoneDimToggles(zone) {
 }
 
 function updateProps() {
-  const obj = canvas.getActiveObject();
+  let obj = canvas.getActiveObject();
+  const canvasLabelTarget = resolveCanvasLabelTarget(obj);
+  if (canvasLabelTarget) obj = canvasLabelTarget;
   const content = document.getElementById("props-content");
   const form = document.getElementById("props-form");
   const memoField = document.getElementById("prop-zone-memo-field");
   if (memoField) memoField.hidden = true;
   hideCanvasLabelFontSizeField();
+  hideCanvasLabelMemoField();
 
   if (activeTool === "text" && !obj && !pendingPlacementZone) {
     lastPropsTargetKey = "text-tool";
@@ -4105,15 +4144,16 @@ function updateProps() {
   if (obj.objectType === "canvasLabel") {
     lastPropsTargetKey = propsTargetKey(obj);
     form.hidden = false;
-    content.innerHTML = `<p class="prop-meta">図面上のテキスト（ダブルクリックでも編集 · Enter で改行）</p>`;
-    document.getElementById("prop-label").closest(".prop-field").hidden = false;
+    content.innerHTML = `<p class="prop-meta">メインテキストは図面上でダブルクリック（Enterで改行）</p>`;
+    document.getElementById("prop-label").closest(".prop-field").hidden = true;
     document.querySelectorAll("#props-form .prop-row").forEach((row) => {
       row.hidden = true;
     });
     document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
     if (memoField) memoField.hidden = true;
     showCanvasLabelFontSizeField(obj.fontSize || CANVAS_LABEL_FONT_SIZE);
-    setInputValueIfIdle(document.getElementById("prop-label"), obj.text || "");
+    document.getElementById("prop-canvas-label-memo-field").hidden = false;
+    setInputValueIfIdle(document.getElementById("prop-canvas-label-memo"), obj.canvasLabelMemo || "");
     return;
   }
 
@@ -4148,7 +4188,7 @@ function undo() {
         upgradeZoneObject(o);
         applyInteractiveControls(o);
       } else if (o.objectType === "canvasLabel") {
-        upgradeCanvasLabel(o);
+        o = upgradeCanvasLabel(o);
         applyInteractiveControls(o);
       } else {
         upgradePartGroup(o);
@@ -4222,7 +4262,7 @@ function restoreDesign(key, data = loadDesign(key), opts = {}) {
             upgradeZoneObject(o);
             applyInteractiveControls(o);
           } else if (o.objectType === "canvasLabel") {
-            upgradeCanvasLabel(o);
+            o = upgradeCanvasLabel(o);
             applyInteractiveControls(o);
           } else {
             upgradePartGroup(o);

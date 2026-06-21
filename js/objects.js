@@ -25,6 +25,9 @@ const SERIALIZE_PROPS = [
   "zoneMarkLabel",
   "zoneMarkIndex",
   "zoneMarkLinkIndex",
+  "canvasLabelMemo",
+  "canvasLabelRole",
+  "fontSize",
 ];
 
 const LABEL_PAD = 5;
