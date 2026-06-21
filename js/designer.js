@@ -537,6 +537,7 @@ function initCanvas() {
       canvas.setActiveObject(pendingPlacementZone);
     }
     e.selected?.forEach(applyInteractiveControls);
+    normalizeCanvasLabelSelection();
     updateProps();
   });
   canvas.on("selection:updated", (e) => {
@@ -548,6 +549,7 @@ function initCanvas() {
       canvas.setActiveObject(pendingPlacementZone);
     }
     e.selected?.forEach(applyInteractiveControls);
+    normalizeCanvasLabelSelection();
     updateProps();
   });
   canvas.on("selection:cleared", () => {
@@ -3119,7 +3121,7 @@ function handleCanvasRightClick(opt) {
 }
 
 function placeCanvasLabel(x, y) {
-  const label = createCanvasLabel("テキスト", x, y, pendingCanvasLabelFontSize);
+  const label = createCanvasLabel("", x, y, pendingCanvasLabelFontSize);
   canvas.add(label);
   bringCanvasLabelsToFront(canvas, drawingImage);
   canvas.setActiveObject(label);
@@ -3149,6 +3151,16 @@ function onCanvasMouseDown(opt) {
   if (scaleCalibCleanup) return;
 
   if (zoneVertexEditCleanup) return;
+
+  if (e.button === 0) {
+    const label = hitCanvasLabel(opt.target);
+    if (label) {
+      canvas.setActiveObject(label);
+      applyInteractiveControls(label);
+      updateProps();
+      return;
+    }
+  }
 
   if (activeTool === "zone") return;
 
@@ -3640,6 +3652,19 @@ function setupPropsForm() {
   bind("prop-fill", () => applyPropToSelection("fill"));
   bind("prop-stroke", () => applyPropToSelection("stroke"));
   bind("prop-rotation", () => applyPropToSelection("rotation"));
+}
+
+function hitCanvasLabel(target) {
+  if (!target) return null;
+  if (target.objectType === "canvasLabel") return target;
+  if (target.group?.objectType === "canvasLabel") return target.group;
+  return null;
+}
+
+function normalizeCanvasLabelSelection() {
+  const obj = canvas.getActiveObject();
+  const label = resolveCanvasLabelTarget(obj);
+  if (label && obj !== label) canvas.setActiveObject(label);
 }
 
 function resolveCanvasLabelTarget(obj) {

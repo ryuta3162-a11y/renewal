@@ -6,7 +6,7 @@ const LABEL_FONT =
   '"Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif';
 
 function makeMainText(text, fontSize) {
-  return new fabric.IText(text || "テキスト", {
+  return new fabric.IText(text || "", {
     left: 0,
     top: 0,
     originX: "left",
@@ -145,7 +145,7 @@ export function upgradeCanvasLabel(obj) {
   if (obj.type === "i-text") {
     const fontSize = obj.fontSize || CANVAS_LABEL_FONT_SIZE;
     const group = buildCanvasLabelGroup({
-      text: obj.text || "テキスト",
+      text: obj.text || "",
       x: obj.left,
       y: obj.top,
       fontSize,

@@ -13,7 +13,7 @@ export const KYODO_SCALE_HINTS = [
 ];
 
 /** bump when drawings/*.pdf bytes change (CDN/ブラウザキャッシュ回避) */
-export const DRAWING_ASSET_VERSION = 4;
+export const DRAWING_ASSET_VERSION = 5;
 
 /** 旧ファイル名 → 現在の drawings 内の実ファイル */
 export const DRAWING_FILE_ALIASES = {
