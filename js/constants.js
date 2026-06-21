@@ -18,6 +18,8 @@ export const DRAWING_FILE_ALIASES = {
   "/drawings/kushita-2.pdf": "/drawings/日下　2F.pdf",
   "/drawings/kushita-3.pdf": "/drawings/日下　3F.pdf",
   "/drawings/mito.pdf": "/drawings/みと　まとめ.pdf",
+  "/drawings/mito-2.pdf": "/drawings/みと　2F.pdf",
+  "/drawings/mito-3.pdf": "/drawings/みと　3F.pdf",
   "/drawings/日下①.pdf": "/drawings/日下　2F.pdf",
   "/drawings/日下　入口.pdf": "/drawings/日下　2F.pdf",
   "/drawings/日下②.pdf": "/drawings/日下　2F.pdf",
@@ -44,6 +46,8 @@ export const DRAWING_ID_ALIASES = {
   "kushita-2": "日下②",
   "kushita-3": "日下③",
   mito: "みと①",
+  "mito-2": "みと-2F",
+  "mito-3": "みと-3F",
 };
 
 export function resolveDrawingFile(file) {
@@ -77,6 +81,8 @@ export const DRAWINGS = [
   { id: "石田-2F", name: "石田　2F", file: "/drawings/石田　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "石田-3F", name: "石田　3F", file: "/drawings/石田　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "みと①", name: "みと　まとめ", file: "/drawings/みと　まとめ.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "みと-2F", name: "みと　2F", file: "/drawings/みと　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "みと-3F", name: "みと　3F", file: "/drawings/みと　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "日下②", name: "日下　2F", file: "/drawings/日下　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "日下③", name: "日下　3F", file: "/drawings/日下　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "gyotoku-1", name: "行徳　2F", file: "/drawings/行徳　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
