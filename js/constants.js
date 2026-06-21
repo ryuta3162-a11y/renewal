@@ -22,6 +22,8 @@ export const DRAWING_FILE_ALIASES = {
   "/drawings/日下②.pdf": "/drawings/日下　2F.pdf",
   "/drawings/日下③.pdf": "/drawings/日下 3F.pdf",
   "/drawings/みと①.pdf": "/drawings/みと　まとめ.pdf",
+  "/drawings/gyotoku-1.pdf": "/drawings/行徳　2F.pdf",
+  "/drawings/gyotoku-2.pdf": "/drawings/行徳　3F.pdf",
 };
 
 /** 旧 id → 新 id（保存データの引き継ぎ用） */
@@ -55,8 +57,8 @@ export function drawingFileKey(file) {
 }
 
 export const DRAWINGS = [
-  { id: "gyotoku-1", name: "gyotoku-1", file: "/drawings/gyotoku-1.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
-  { id: "gyotoku-2", name: "gyotoku-2", file: "/drawings/gyotoku-2.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "gyotoku-1", name: "行徳　2F", file: "/drawings/行徳　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
+  { id: "gyotoku-2", name: "行徳　3F", file: "/drawings/行徳　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
   { id: "kyodo-7", name: "原本-7", file: "/drawings/kyodo-7.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "kyodo-8", name: "原本-8", file: "/drawings/kyodo-8.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "kyodo-9", name: "原本-9", file: "/drawings/kyodo-9.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
