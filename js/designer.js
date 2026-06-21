@@ -138,6 +138,9 @@ import {
   createCanvasLabel,
   upgradeCanvasLabel,
   bringCanvasLabelsToFront,
+  isFabricTextEditing,
+  CANVAS_LABEL_FONT_SIZE,
+  CANVAS_LABEL_FONT_SIZES,
 } from "./canvas-label.js";
 
 const canvasWrap = document.getElementById("canvas-wrap");
@@ -158,6 +161,7 @@ let isDrawingLoading = false;
 let storageMigratedCount = 0;
 let polygonCleanup = null;
 let activeTool = "zone";
+let pendingCanvasLabelFontSize = CANVAS_LABEL_FONT_SIZE;
 let pendingZonePreset = ZONE_PRESETS[0];
 let pendingPlacementZone = null;
 let pendingPart = null;
@@ -421,6 +425,7 @@ function initCanvas() {
   canvas.selection = false;
   canvas.selectionKey = null;
   canvas.altSelectionKey = null;
+  fabric.IText.prototype.exitEditingOnEnter = false;
 
   canvas.on("object:modified", (e) => {
     if (isRestoringHistory) return;
@@ -593,6 +598,10 @@ function initCanvas() {
   canvas.on("mouse:up", onCanvasMouseUp);
   canvas.on("mouse:dblclick", onCanvasDoubleClick);
   canvas.on("text:changed", () => {
+    scheduleAutoSave();
+  });
+  canvas.on("text:editing:exited", () => {
+    updateProps();
     scheduleAutoSave();
   });
 
@@ -3092,7 +3101,7 @@ function handleCanvasRightClick(opt) {
 }
 
 function placeCanvasLabel(x, y) {
-  const label = createCanvasLabel("テキスト", x, y);
+  const label = createCanvasLabel("テキスト", x, y, pendingCanvasLabelFontSize);
   canvas.add(label);
   bringCanvasLabelsToFront(canvas, drawingImage);
   canvas.setActiveObject(label);
@@ -3485,6 +3494,7 @@ function setTool(tool) {
   }
   updateCanvasCursor();
   updateDrawingInteractivity();
+  if (tool === "text") updateProps();
 }
 
 function updateCanvasCursor() {
@@ -3545,8 +3555,35 @@ function zoomCanvas(factor) {
 }
 
 // ── Properties ────────────────────────────────────
+function setupCanvasLabelFontSizeSelect() {
+  const sel = document.getElementById("prop-label-font-size");
+  if (!sel || sel.options.length) return;
+  CANVAS_LABEL_FONT_SIZES.forEach((size) => {
+    const opt = document.createElement("option");
+    opt.value = String(size);
+    opt.textContent = `${size}px`;
+    sel.appendChild(opt);
+  });
+  sel.value = String(pendingCanvasLabelFontSize);
+}
+
+function showCanvasLabelFontSizeField(size = pendingCanvasLabelFontSize) {
+  const field = document.getElementById("prop-label-font-size-field");
+  const sel = document.getElementById("prop-label-font-size");
+  if (!field || !sel) return;
+  field.hidden = false;
+  setInputValueIfIdle(sel, String(size));
+}
+
+function hideCanvasLabelFontSizeField() {
+  const field = document.getElementById("prop-label-font-size-field");
+  if (field) field.hidden = true;
+}
+
 function setupPropsForm() {
+  setupCanvasLabelFontSizeSelect();
   const bind = (id, fn) => document.getElementById(id)?.addEventListener("input", fn);
+  const bindChange = (id, fn) => document.getElementById(id)?.addEventListener("change", fn);
 
   document.getElementById("prop-use-image")?.addEventListener("change", (e) => {
     if (!MACHINES_UI_ENABLED) return;
@@ -3556,6 +3593,17 @@ function setupPropsForm() {
   });
 
   bind("prop-label", () => applyPropToSelection("label"));
+  bindChange("prop-label-font-size", () => {
+    const obj = canvas.getActiveObject();
+    if (obj?.objectType === "canvasLabel") {
+      applyPropToSelection("fontSize");
+      return;
+    }
+    if (activeTool === "text") {
+      pendingCanvasLabelFontSize =
+        Number(document.getElementById("prop-label-font-size").value) || CANVAS_LABEL_FONT_SIZE;
+    }
+  });
   bind("prop-zone-memo", () => applyPropToSelection("memo"));
   bind("prop-width", () => applyPropToSelection("width"));
   bind("prop-height", () => applyPropToSelection("height"));
@@ -3592,6 +3640,16 @@ function applyPropToSelection(field) {
       obj.set("text", document.getElementById("prop-label").value);
       canvas.requestRenderAll();
       scheduleAutoSave();
+    }
+    if (field === "fontSize") {
+      const size = Number(document.getElementById("prop-label-font-size").value);
+      if (size > 0) {
+        obj.set({ fontSize: size });
+        obj.setCoords();
+        pendingCanvasLabelFontSize = size;
+        canvas.requestRenderAll();
+        scheduleAutoSave();
+      }
     }
     return;
   }
@@ -3778,6 +3836,20 @@ function updateProps() {
   const form = document.getElementById("props-form");
   const memoField = document.getElementById("prop-zone-memo-field");
   if (memoField) memoField.hidden = true;
+  hideCanvasLabelFontSizeField();
+
+  if (activeTool === "text" && !obj && !pendingPlacementZone) {
+    lastPropsTargetKey = "text-tool";
+    form.hidden = false;
+    content.innerHTML = `<p class="prop-meta">クリックしてテキストを配置（Enter で改行）</p>`;
+    document.getElementById("prop-label").closest(".prop-field").hidden = true;
+    document.querySelectorAll("#props-form .prop-row").forEach((row) => {
+      row.hidden = true;
+    });
+    document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
+    showCanvasLabelFontSizeField(pendingCanvasLabelFontSize);
+    return;
+  }
 
   if (pendingPlacementZone) {
     const z = pendingPlacementZone;
@@ -4033,13 +4105,14 @@ function updateProps() {
   if (obj.objectType === "canvasLabel") {
     lastPropsTargetKey = propsTargetKey(obj);
     form.hidden = false;
-    content.innerHTML = `<p class="prop-meta">図面上のテキスト（ダブルクリックでも編集）</p>`;
+    content.innerHTML = `<p class="prop-meta">図面上のテキスト（ダブルクリックでも編集 · Enter で改行）</p>`;
     document.getElementById("prop-label").closest(".prop-field").hidden = false;
     document.querySelectorAll("#props-form .prop-row").forEach((row) => {
       row.hidden = true;
     });
     document.getElementById("prop-rotation").closest(".prop-field").hidden = true;
     if (memoField) memoField.hidden = true;
+    showCanvasLabelFontSizeField(obj.fontSize || CANVAS_LABEL_FONT_SIZE);
     setInputValueIfIdle(document.getElementById("prop-label"), obj.text || "");
     return;
   }
@@ -4740,7 +4813,7 @@ function pasteClipboardObject() {
 function setupKeyboard() {
   document.addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea, select")) return;
-    if (canvas?.getActiveObject()?.isEditing) return;
+    if (isFabricTextEditing(canvas)) return;
 
     if (scaleCalibCleanup || scaleCalibPendingPoints) {
       if (e.key === "Escape") {
@@ -4781,13 +4854,13 @@ function setupKeyboard() {
       return;
     }
 
-    if (e.code === "Space") {
+    if (e.code === "Space" && !isFabricTextEditing(canvas)) {
       spaceDown = true;
       e.preventDefault();
       updateCanvasCursor();
     }
     if (e.key === "Delete" || (e.key === "Backspace" && activeTool === "select")) {
-      if (canvas.getActiveObject()?.isEditing) return;
+      if (isFabricTextEditing(canvas)) return;
       e.preventDefault();
       deleteSelected();
     }
