@@ -80,6 +80,7 @@ export const DRAWINGS = [
   { id: "kyodo-7", name: "経堂原本　入口", file: "/drawings/経堂原本　入口.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "kyodo-8", name: "経堂原本　2F", file: "/drawings/経堂原本　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "kyodo-9", name: "経堂原本　3F", file: "/drawings/経堂原本　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
+  { id: "renewal-machines-2f", name: "リニューアル候補マシン　2F", file: "/drawings/経堂原本　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "蜂谷-2F", name: "蜂谷　2F", file: "/drawings/蜂谷　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
   { id: "蜂谷-3F", name: "蜂谷　3F", file: "/drawings/蜂谷　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS },
   { id: "石田-2F", name: "石田　2F", file: "/drawings/石田　2F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM, scaleHints: KYODO_SCALE_HINTS, planAreaM2: 525.21, planAreaTsubo: 158.87 },
@@ -93,8 +94,8 @@ export const DRAWINGS = [
   { id: "gyotoku-2", name: "行徳　3F", file: "/drawings/行徳　3F.pdf", kind: "pdf", planWidthMm: DEFAULT_PLAN_WIDTH_MM },
 ];
 
-/** false = マシンUI非表示（データファイルは残す） */
-export const MACHINES_UI_ENABLED = false;
+/** true = マシンUI表示（候補マシンを図面上に配置できる） */
+export const MACHINES_UI_ENABLED = true;
 
 /** 取り壊し・移動などの記号パーツ（区画とは別） */
 export const MARKS_UI_ENABLED = false;
