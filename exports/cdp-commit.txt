@@ -1,0 +1,1 @@
+(function(){const t=window.__sheetFormula; const el=document.activeElement; if(!el) return {err:'no el'}; el.focus(); document.execCommand('selectAll'); const ok=document.execCommand('insertText', false, t); return {ok, len:t.length, tag:el.tagName, preview:(el.value||el.textContent||'').slice(0,60)};})()

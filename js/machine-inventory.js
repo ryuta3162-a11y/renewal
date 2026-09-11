@@ -1,59 +1,45 @@
 import { CATEGORY_COLORS } from "./parts-library.js";
 
-/** 経堂ジム 現状マシン・設備一覧（2025時点）＋リニューアル候補 */
+/** 経堂ジム 現状マシン・設備一覧（写真・寸法ベース）＋リニューアル候補
+ *  w/h は図面上の配置用フットプリント（おおよそ cm）。
+ *  配置: パレット選択 → 図面上ドラッグ。削除: 選択して Delete。
+ */
 const INVENTORY = [
-  // 有酸素マシン
-  { category: "有酸素", label: "ランニングマシン", count: 13, w: 95, h: 42 },
-  { category: "有酸素", label: "アセントトレーナー", count: 4, w: 75, h: 55 },
-  { category: "有酸素", label: "バイクマシン", count: 3, w: 55, h: 70 },
+  // 有酸素（現状）
+  { category: "有酸素", label: "トレッドミル", count: 13, w: 91, h: 174, note: "Technogym Excite Run系" },
+  { category: "有酸素", label: "クロストレーナー", count: 4, w: 70, h: 218, note: "Technogym Synchro系" },
+  { category: "有酸素", label: "エアロバイク", count: 1, w: 60, h: 114, note: "Technogym Bike系" },
+  { category: "有酸素", label: "リクラインバイク", count: 2, w: 60, h: 160, note: "Technogym Recline系" },
 
-  // 筋トレマシン
-  { category: "筋トレ", label: "レッグプレス", count: 1, w: 90, h: 75 },
-  { category: "筋トレ", label: "レッグエクステンション", count: 1, w: 80, h: 65 },
-  { category: "筋トレ", label: "レッグカール", count: 1, w: 80, h: 65 },
-  { category: "筋トレ", label: "ラットプルダウン", count: 1, w: 75, h: 70 },
-  { category: "筋トレ", label: "シーテッドロー", count: 1, w: 85, h: 65 },
-  { category: "筋トレ", label: "チェストプレス", count: 1, w: 85, h: 70 },
-  { category: "筋トレ", label: "リアデルト・ペックフライ", count: 1, w: 80, h: 65 },
-  { category: "筋トレ", label: "ロータリートルソー", count: 1, w: 70, h: 70 },
-  { category: "筋トレ", label: "アブドミナルクランチ", count: 1, w: 70, h: 60 },
-  { category: "筋トレ", label: "グルートキックバック", count: 1, w: 70, h: 65 },
-  { category: "筋トレ", label: "ショルダーマシン", count: 1, w: 75, h: 65 },
-  { category: "筋トレ", label: "ヒップアブダクション", count: 1, w: 70, h: 60 },
-  { category: "筋トレ", label: "ヒップアダクション", count: 1, w: 70, h: 60 },
+  // 筋トレ（現状 Cybex中心）
+  { category: "筋トレ", label: "レッグプレス", count: 1, w: 106, h: 172, note: "Cybex Eagle NX" },
+  { category: "筋トレ", label: "ショルダープレス", count: 1, w: 155, h: 173, note: "Cybex Eagle NX" },
+  { category: "筋トレ", label: "ペックフライ/リアデルト", count: 1, w: 150, h: 135, note: "Cybex Prestige" },
+  { category: "筋トレ", label: "ラットプルダウン", count: 1, w: 110, h: 153, note: "Cybex VR1" },
+  { category: "筋トレ", label: "グルート", count: 1, w: 101, h: 127, note: "Cybex VR1" },
+  { category: "筋トレ", label: "シットアップベンチ", count: 1, w: 70, h: 160 },
+  { category: "筋トレ", label: "バックエクステンション", count: 1, w: 80, h: 130 },
+  { category: "筋トレ", label: "レッグエクステンション", count: 1, w: 109, h: 127, note: "Cybex Eagle NX" },
+  { category: "筋トレ", label: "レッグカール", count: 1, w: 108, h: 158, note: "Cybex Eagle NX" },
+  { category: "筋トレ", label: "ヒップアブ/アド", count: 1, w: 84, h: 163, note: "Cybex Eagle NX・両用1台" },
+  { category: "筋トレ", label: "ロータリートルソー", count: 1, w: 119, h: 117, note: "Cybex Eagle NX" },
+  { category: "筋トレ", label: "チェストプレス", count: 1, w: 145, h: 114, note: "Cybex Eagle NX" },
+  { category: "筋トレ", label: "ローロー", count: 1, w: 108, h: 174, note: "Cybex Eagle NX" },
+  { category: "筋トレ", label: "アブドミナル", count: 1, w: 101, h: 146, note: "Cybex Eagle NX" },
 
-  // フリーウエイト
-  { category: "フリーウェイト", label: "パワーラック", count: 2, w: 95, h: 95 },
-  { category: "フリーウェイト", label: "スミスマシン", count: 2, w: 90, h: 90 },
-  { category: "フリーウェイト", label: "ケーブルマシン", count: 1, w: 80, h: 75 },
-  { category: "フリーウェイト", label: "プリチャーカール台", count: 1, w: 70, h: 55 },
-  { category: "フリーウェイト", label: "アジャスタブルベンチ", count: 3, w: 65, h: 40 },
-  {
-    category: "フリーウェイト",
-    label: "マルチジャングル",
-    count: 1,
-    w: 110,
-    h: 80,
-    note: "ラットプル・シーテッドロー・ケーブル",
-  },
-  {
-    category: "フリーウェイト",
-    label: "インクラインチェストプレス",
-    count: 1,
-    w: 85,
-    h: 70,
-    note: "プレートロード",
-  },
-  {
-    category: "フリーウェイト",
-    label: "45°レッグプレス",
-    count: 1,
-    w: 90,
-    h: 75,
-    note: "プレートロード",
-  },
-  { category: "フリーウェイト", label: "チンニング・ディップス", count: 1, w: 75, h: 75 },
-  { category: "フリーウェイト", label: "ベンチプレス台", count: 1, w: 80, h: 55 },
+  // フリーウエイト（現状）
+  { category: "フリーウェイト", label: "パワーラック", count: 2, w: 120, h: 150, note: "BULL" },
+  { category: "フリーウェイト", label: "スミスマシン", count: 3, w: 200, h: 140, note: "Technogym想定" },
+  { category: "フリーウェイト", label: "ケーブルマシン Bravo", count: 1, w: 137, h: 114, note: "Cybex Bravo" },
+  { category: "フリーウェイト", label: "ケーブルマシン DAP", count: 1, w: 120, h: 145, note: "Technogym DAP" },
+  { category: "フリーウェイト", label: "プリチャーカール", count: 1, w: 80, h: 110, note: "Steelflex" },
+  { category: "フリーウェイト", label: "アジャスタブルベンチ", count: 5, w: 70, h: 140 },
+  { category: "フリーウェイト", label: "マルチジャングル", count: 1, w: 250, h: 400 },
+  { category: "フリーウェイト", label: "インクラインチェストプレス", count: 1, w: 143, h: 208, note: "Matrix" },
+  { category: "フリーウェイト", label: "45°レッグプレス", count: 1, w: 150, h: 220 },
+  { category: "フリーウェイト", label: "チンニング＆ディップス", count: 1, w: 127, h: 114, note: "Life Fitness" },
+  { category: "フリーウェイト", label: "ベンチプレス台", count: 1, w: 130, h: 170, note: "BULL" },
+  { category: "フリーウェイト", label: "ダンベルラック", count: 1, w: 70, h: 250, note: "IVANKO〜40kg" },
 
   // 設備
   { category: "設備", label: "Wi-Fi", count: 1, w: 40, h: 40, note: "無料Wi-Fi完備" },

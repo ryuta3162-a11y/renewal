@@ -1,0 +1,34 @@
+﻿カテゴリ	名称	台数	幅(mm)	奥行(mm)	高さ(mm)	寸法信頼度	備考	出典
+有酸素	ランニングマシン	13	950	420		低	現状在庫	renewal/machine-inventory.js
+有酸素	アセントトレーナー	4	750	550		低	現状在庫	renewal/machine-inventory.js
+有酸素	バイクマシン	3	550	700		低	現状在庫	renewal/machine-inventory.js
+筋トレ	レッグプレス	1	900	750		低	現状在庫	renewal/machine-inventory.js
+筋トレ	レッグエクステンション	1	800	650		低	現状在庫	renewal/machine-inventory.js
+筋トレ	レッグカール	1	800	650		低	現状在庫	renewal/machine-inventory.js
+筋トレ	ラットプルダウン	1	750	700		低	現状在庫	renewal/machine-inventory.js
+筋トレ	シーテッドロー	1	850	650		低	現状在庫	renewal/machine-inventory.js
+筋トレ	チェストプレス	1	850	700		低	現状在庫	renewal/machine-inventory.js
+筋トレ	リアデルト・ペックフライ	1	800	650		低	現状在庫	renewal/machine-inventory.js
+筋トレ	ロータリートルソー	1	700	700		低	現状在庫	renewal/machine-inventory.js
+筋トレ	アブドミナルクランチ	1	700	600		低	現状在庫	renewal/machine-inventory.js
+筋トレ	グルートキックバック	1	700	650		低	現状在庫	renewal/machine-inventory.js
+筋トレ	ショルダーマシン	1	750	650		低	現状在庫	renewal/machine-inventory.js
+筋トレ	ヒップアブダクション	1	700	600		低	現状在庫	renewal/machine-inventory.js
+筋トレ	ヒップアダクション	1	700	600		低	現状在庫	renewal/machine-inventory.js
+フリーウェイト	パワーラック	2	950	950		低	現状在庫	renewal/machine-inventory.js
+フリーウェイト	スミスマシン	2	900	900		低	現状在庫	renewal/machine-inventory.js
+フリーウェイト	ケーブルマシン	1	800	750		低	現状在庫	renewal/machine-inventory.js
+フリーウェイト	プリチャーカール台	1	700	550		低	現状在庫	renewal/machine-inventory.js
+フリーウェイト	アジャスタブルベンチ	3	650	400		低	現状在庫	renewal/machine-inventory.js
+フリーウェイト	マルチジャングル	1	1100	800		低	ラットプル・シーテッドロー・ケーブル	renewal/machine-inventory.js
+フリーウェイト	インクラインチェストプレス	1	850	700		低	プレートロード	renewal/machine-inventory.js
+フリーウェイト	45°レッグプレス	1	900	750		低	プレートロード	renewal/machine-inventory.js
+フリーウェイト	チンニング・ディップス	1	750	750		低	現状在庫	renewal/machine-inventory.js
+フリーウェイト	ベンチプレス台	1	800	550		低	現状在庫	renewal/machine-inventory.js
+
+参考（写真ギャラリー台数）								
+有酸素マシン（写真枚数）	24KYODO-MACHINE cardio_*	3					機種名なし・写真のみ	https://github.com/ryuta3162-a11y/24KYODO-MACHINE
+ウェイトマシン（写真枚数）	24KYODO-MACHINE resistance_*	15					機種名なし・写真のみ	https://github.com/ryuta3162-a11y/24KYODO-MACHINE
+フリーウェイト（写真枚数）	24KYODO-MACHINE freeweight_*	12					機種名なし・写真のみ	https://github.com/ryuta3162-a11y/24KYODO-MACHINE
+
+合計（名称付き在庫）		47					設備Wi-Fi/駐車場は除外	

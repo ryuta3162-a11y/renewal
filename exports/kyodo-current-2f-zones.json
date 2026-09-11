@@ -1,0 +1,22 @@
+﻿{
+  "format": "renewal-studio-share",
+  "version": 1,
+  "note": "経堂現状概略2F — 区画たたき台（未完成）。Studioで保存済みの区画と対応。",
+  "projectId": "master",
+  "sheet": {
+    "id": "kyodo-current-2f",
+    "name": "経堂現状概略　2F",
+    "file": "/drawings/経堂現状概略　2F.png",
+    "kind": "image",
+    "planWidthMm": 29080
+  },
+  "zones": [
+    { "id": "cardio", "name": "有酸素エリア", "img": [120, 178, 2960, 300] },
+    { "id": "locker", "name": "更衣室・水回り", "img": [120, 510, 400, 900] },
+    { "id": "machine", "name": "マシンエリア", "img": [770, 510, 1050, 500] },
+    { "id": "stretch", "name": "ストレッチエリア", "img": [770, 1040, 1050, 370] },
+    { "id": "fw", "name": "FWエリア", "img": [1860, 510, 1220, 900] }
+  ],
+  "mmPerImagePx": 9.0875,
+  "status": "draft"
+}

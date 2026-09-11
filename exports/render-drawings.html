@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>図面PDF → PNG</title>
+  <style>
+    body { font-family: sans-serif; margin: 16px; background: #111; color: #eee; }
+    .card { margin: 16px 0; padding: 12px; background: #1a1a1a; border-radius: 8px; }
+    img { max-width: 100%; border: 1px solid #333; background: #fff; }
+    .ok { color: #4ade80; }
+    .err { color: #f87171; }
+  </style>
+</head>
+<body>
+  <h1>図面画像（社長提案用）</h1>
+  <p id="status">PDFを画像化しています…</p>
+  <div id="out"></div>
+  <script type="module">
+    import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs";
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
+
+    const FILES = [
+      { id: "kyodo-entrance", file: "/drawings/経堂原本　入口.pdf", label: "経堂原本　入口" },
+      { id: "kyodo-2f", file: "/drawings/経堂原本　2F.pdf", label: "経堂原本　2F" },
+      { id: "kyodo-3f", file: "/drawings/経堂原本　3F.pdf", label: "経堂原本　3F" },
+      { id: "kushita-2f", file: "/drawings/日下　2F.pdf", label: "日下　2F" },
+      { id: "kushita-3f", file: "/drawings/日下　3F.pdf", label: "日下　3F" },
+      { id: "gyotoku-2f", file: "/drawings/行徳　2F.pdf", label: "行徳　2F" },
+      { id: "gyotoku-3f", file: "/drawings/行徳　3F.pdf", label: "行徳　3F" },
+    ];
+
+    const out = document.getElementById("out");
+    const status = document.getElementById("status");
+    window.__proposalRenders = {};
+
+    async function renderOne({ id, file, label }) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `<h2>${label}</h2><p class="meta">読み込み中…</p>`;
+      out.appendChild(card);
+      const meta = card.querySelector(".meta");
+      try {
+        const url = file.split("/").map((p, i) => (i === 0 ? p : encodeURIComponent(p))).join("/").replace("%2F", "/");
+        // encode only filename
+        const parts = file.split("/");
+        const enc = parts.slice(0, -1).join("/") + "/" + encodeURIComponent(parts.at(-1));
+        const res = await fetch(enc);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const buf = await res.arrayBuffer();
+        const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+        const page = await doc.getPage(1);
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+        const dataUrl = canvas.toDataURL("image/png");
+        window.__proposalRenders[id] = { label, file, dataUrl, w: canvas.width, h: canvas.height };
+        const img = document.createElement("img");
+        img.src = dataUrl;
+        img.alt = label;
+        meta.textContent = `${canvas.width}×${canvas.height} / pages=${doc.numPages}`;
+        meta.className = "ok";
+        card.appendChild(img);
+      } catch (e) {
+        meta.textContent = String(e);
+        meta.className = "err";
+      }
+    }
+
+    for (const f of FILES) await renderOne(f);
+    status.textContent = `完了: ${Object.keys(window.__proposalRenders).length} / ${FILES.length}`;
+    window.__proposalReady = true;
+  </script>
+</body>
+</html>
