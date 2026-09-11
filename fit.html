@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>実測フィット — 経堂原本</title>
+  <link rel="stylesheet" href="css/style.css?v=6" />
+  <link rel="stylesheet" href="css/fit.css?v=5" />
+</head>
+<body>
+  <div class="fit-page">
+    <header class="topbar fit-topbar">
+      <div class="brand">
+        <span class="brand-mark">R</span>
+        <div>
+          <strong>実測フィット</strong>
+          <div class="brand-sub">経堂原本の図面にマシンを置く</div>
+        </div>
+      </div>
+      <div class="topbar-group floor-tabs" id="floor-tabs">
+        <button type="button" class="btn btn-sm btn-ghost" data-floor="kyodo-8">2F</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-floor="kyodo-9">3F</button>
+      </div>
+      <div class="topbar-group">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-drawing">図面を開く</button>
+        <input type="file" id="import-drawing" accept="application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg,.webp" hidden />
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-rotate">90°回転</button>
+        <a class="btn btn-ghost btn-sm" href="/">旧Studio</a>
+      </div>
+    </header>
+
+    <p class="fit-howto" id="fit-howto">① 左でマシンを選ぶ　→　② 真ん中の図面をクリックして置く</p>
+
+    <div class="fit-workspace simple">
+      <aside class="fit-panel">
+        <div class="fit-panel-head">
+          <h2>マシン一覧</h2>
+          <input id="machine-search" class="fit-search" type="search" placeholder="検索" />
+        </div>
+        <div id="filters" class="fit-filters"></div>
+        <div id="machine-list" class="fit-list"></div>
+      </aside>
+
+      <div class="fit-center">
+        <div id="plan-stage" class="fit-plan-stage">
+          <canvas id="plan-canvas"></canvas>
+          <div id="plan-empty" class="fit-plan-empty">
+            「図面を開く」で <strong>経堂原本　2F.pdf</strong> を選んでください
+          </div>
+          <div id="plan-guide" class="fit-plan-guide" hidden>図面の置きたい場所をクリック</div>
+        </div>
+      </div>
+
+      <aside class="fit-panel right">
+        <div class="fit-panel-head">
+          <h2>いま選んでいるもの</h2>
+        </div>
+        <div id="machine-detail" class="fit-detail">
+          <p class="fit-hint">左のリストからマシンを選んでください</p>
+        </div>
+        <form id="machine-size-form" class="fit-form" hidden>
+          <p class="fit-hint">大きさ（メートル）</p>
+          <div class="fit-size-edit">
+            <label>幅<input id="size-w" type="number" min="0.2" step="0.01" /></label>
+            <label>奥行<input id="size-d" type="number" min="0.2" step="0.01" /></label>
+            <label>高さ<input id="size-h" type="number" min="0.05" step="0.01" /></label>
+          </div>
+        </form>
+        <div class="fit-panel-head">
+          <h2>置いたマシン</h2>
+        </div>
+        <div id="placed-list" class="fit-list"></div>
+      </aside>
+    </div>
+  </div>
+  <script type="module" src="js/fit-app.js?v=7"></script>
+</body>
+</html>

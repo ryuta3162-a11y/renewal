@@ -1,0 +1,23 @@
+検索コード	幅_mm_L列	奥行_mm_M列	高さ_mm	信頼度	出典URL	備考
+A-01	1500	3000	2310	低	https://www.lifefitness.com/en-us/catalog/strength-training/racks-rigs-platforms/hd-athletic-nx-half-half-combo-rack	構成可変。公式幅990–3020mm。配置用は半ラック面の想定1500×3000
+A-02	2400	1920	80	高	https://www.lifefitness.com/en-us/catalog/strength-training/racks-rigs-platforms/impact-suppression-platform	ISP-6X8公式 75.5×94.5×3.25in。ISP-4X8は131×240cmもあり
+A-03	2126	620	810	中	https://evolgear.com/product/evrb-c177.html	ダンベル単体は寸法小。10ペアラックEVRB-C177を占有として採用
+A-04	1400	760	470	高	https://evolgear.com/product/evrb-l139.html	公式 (W)1400×(D)760×(H)470mm
+B-01	1780	740	1450	高	https://www.precor.com/en-US/products/GSL0622	Selectorized 3D Multi-Abductor Pro。L×W×H=74×178×145cm → 奥行×幅
+B-02	1700	1960	1300	高	https://www.precor.com/en-US/products/GPL0612	Hip Thrust Elite GPL0612。L×W×H=196×170×130cm
+B-03	1880	1700	740	高	https://www.precor.com/en-US/products/GPL0551	Deadlift Elite。L×W×H=170×188×74cm
+B-04	1410	1810	640	高	https://www.myarsenalstrength.com/strength-equipment/reloaded/upper-body-reloaded/reloaded-t-bar-row	55.7×71.3×25.1in
+B-05	1380	1580	2030	高	https://gym80.de/en/product/4340/	High Row Dual 4340。H×B×L=2030×1380×1580
+B-06	1825	1475	2000	高	https://gym80.de/en/product/4319/	Low Row Dual 4319。H×B×L=2000×1825×1475
+B-07	1020	1760	470	高	https://gym80.de/en/product/4318/	Bent Over Row 4318。H×B×L=470×1020×1760
+B-08	1060	1550	1210	中	https://gym80.de/en/product/4322/	名称が曖昧なため Seated Row Dual 4322 と解釈
+B-09	880	1390	1330	高	https://gym80.de/en/product/4325/	Shoulder Lateral Raise Dual 4325
+B-10	1294	2206	1361	高	https://gym80.de/en/product/4159n/	Hack Squat 4159N。H×B×L=1361×1294×2206
+B-11	1269	1633	841	高	https://gym80.de/en/product/4337n/	Lying Leg Curl 4337N
+B-12	1322	1336	1037	高	https://gym80.de/en/product/4336n/	Leg Extension 4336N
+B-13	1010	1330	1280	高	https://gym80.de/en/product/4345/	55° Standing Calf Raise 4345
+B-14	1955	1585	1490	高	https://gym80.de/en/product/4360/	Belt Squat 4360
+B-15	1068	2421	1733	高	https://gym80.de/en/product/4353/	Pendulum Squat 4353N
+B-16	946	1530	1243	高	https://gym80.de/en/product/4355/	Biceps Curl Dual 4355
+B-17	1179	1279	1493	高	https://gym80.de/en/product/4339n/	Triceps Extension 4339N
+B-18	1567	2084	1605	高	https://ecoleco-fitness.com/elc-07	ELC-07。公式 奥行×幅×高さ=2084×1567×1605 → L幅=1567 M奥行=2084

@@ -1,0 +1,60 @@
+﻿カテゴリ,サブカテゴリ,目的,検索コード,ブランド,名称,税抜単価,台数,税抜小計,商品リンク,備考,幅(mm),奥行(mm),高さ(mm),寸法信頼度,寸法メモ
+フリーウェイト,,,,,,,,,,,,,,,
+フリーウェイト,ラック,ラックを合計6ステーション化する,A-01 フリーウェイト,Hammer Strength,HD Athletic NX Half Half Combo Rack,"¥4,000,000",2,"¥8,000,000",HD Athletic NX Half Half Combo Rack | Hammer Strength,2台導入で新規4ステーション。既存パワーラック2台と合わせて合計6ステーション想定,1500,3000,2310,低,構成可変。配置想定1500x3000
+フリーウェイト,プラットフォーム,ラック4面に床材を入れる,A-02 フリーウェイト,Hammer Strength,Impact Suppression Platform / Platform床材,"¥600,000",4,"¥2,400,000",https://www.lifefitness.com/en-us/catalog/strength-training/racks-rigs-platforms/impact-suppression-platform,Half Half Combo Rack両面×2台で4面分を想定。正式見積必須,2400,1920,80,高,ISP-6X8公式
+フリーウェイト,ダンベル,ダンベル60kgまで,A-03 フリーウェイト,EVOLGEAR,ラバーダンベル EVA-D104 42.5kg〜60kg追加,"¥471,520",1,"¥471,520",https://evolgear.com/product/eva-d104.html,42.5/45/47.5/50/52.5/55/57.5/60kgを各ペア追加想定,2126,620,810,中,EVRB-C177ラック占有
+フリーウェイト,ベンチ,アジャスタブルベンチ6台体制,A-04 フリーウェイト,EVOLGEAR,アジャスタブルインクラインベンチ EVRB-L139,"¥77,050",3,"¥231,150",https://evolgear.com/product/evrb-l139.html,既存3台＋追加3台で合計6台体制,1400,760,470,高,EVRB-L139公式
+プレートロード,,,,,,,,,,,,,,,
+プレートロード,グルート,最新グルートゾーンを作る,B-01 プレートロード,Precor Glutebuilder,Selectorized 3D Multi-Abductor Pro,"¥2,400,000",1,"¥2,400,000",https://www.precor.com/ja-JP/strength/glutebuilder/selectorized,初心者女性向けの入口。立位・座位・臥位に対応。国内正式見積必須,1780,740,1450,高,GSL0622
+プレートロード,グルート,ヒップスラストを看板化する,B-02 プレートロード,Precor Glutebuilder,Hip Thrust Elite,"¥1,800,000",1,"¥1,800,000",https://www.precor.com/ja-JP/strength/glutebuilder/selectorized,グルートゾーンの主役。国内正式見積必須,1700,1960,1300,高,GPL0612
+プレートロード,グルート,ヒンジ系・男女兼用にする,B-03 プレートロード,Precor Glutebuilder,Deadlift Elite,"¥1,500,000",1,"¥1,500,000",https://www.precor.com/en-US/strength/glutebuilder,片側14kgスタート・高重量対応。男性上級者にも刺さる,1880,1700,740,高,GPL0551
+プレートロード,背中,背中の厚みを作る,B-04 プレートロード,Arsenal Strength,Reloaded T Bar Row,"¥1,200,000",1,"¥1,200,000",https://www.myarsenalstrength.com/strength-equipment/reloaded/upper-body-reloaded/reloaded-t-bar-row,WARRIORS GYM系。背中の目玉,1410,1810,640,高,Arsenal公式
+プレートロード,背中,ハイローを入れる,B-05 プレートロード,gym80,Pure Kraft High Row Dual,"¥2,200,000",1,"¥2,200,000",https://gym80.de/en/product/4340/,背中の広がり。gym80枠,1380,1580,2030,高,4340
+プレートロード,背中,ローローを入れる,B-06 プレートロード,gym80,Pure Kraft Low Row Dual,"¥2,200,000",1,"¥2,200,000",https://www.gym80.co.uk/products/pure-kraft-low-row,背中の厚み。玄人向け,1825,1475,2000,高,4319
+プレートロード,背中,ベントオーバーローを入れる,B-07 プレートロード,gym80,Pure Kraft Bent Over Row,"¥1,600,000",1,"¥1,600,000",https://gym80.de/en/product/4318/,背中・リア側。見た目も珍しい,1020,1760,470,高,4318
+プレートロード,背中,シーテッドローを高級化する,B-08 プレートロード,gym80,Seated Row Machine / Dual Row系,"¥1,800,000",1,"¥1,800,000",https://gym80.de/en/product/3040/,レジスタンス寄りの高級ロー。既存との置換候補,1200,1300,1620,高,Seated Row Machine 3040
+プレートロード,肩,ラテラルレイズを入れる,B-09 プレートロード,gym80,Pure Kraft Shoulder Lateral Raise Dual,"¥2,200,000",1,"¥2,200,000",https://www.gym80.co.uk/products/pure-kraft-shoulder-lateral-raise-dual,フィジーク層・ボディメイク層向け,880,1390,1330,高,4325
+プレートロード,脚,ハックスクワットを入れる,B-10 プレートロード,gym80,Pure Kraft Hack Squat,"¥2,300,000",1,"¥2,300,000",https://gym80.de/en/product/4159n/,脚トレの本命。3段階調整フットプレート,1294,2206,1361,高,4159N
+プレートロード,脚,ライイングレッグカールを入れる,B-11 プレートロード,gym80,Pure Kraft Lying Leg Curl,"¥1,800,000",1,"¥1,800,000",https://gym80.de/en/product/4337n/,ハムストリング特化。脚の完成度を上げる,1269,1633,841,高,4337N
+プレートロード,脚,レッグエクステンションを入れる,B-12 プレートロード,gym80,Pure Kraft Leg Extension,"¥1,800,000",1,"¥1,800,000",https://gym80.de/en/product/4336n/,大腿四頭筋。既存更新・高級化候補,1322,1336,1037,高,4336N
+プレートロード,脚,カーフ専用マシンを入れる,B-13 プレートロード,gym80,Pure Kraft 55 Degrees Standing Calf Raise,"¥1,800,000",1,"¥1,800,000",https://gym80.de/en/product/4345/,置いてあるジムが少なく差別化しやすい,1010,1330,1280,高,4345
+プレートロード,脚尻,ベルトスクワットを入れる,B-14 プレートロード,gym80,Pure Kraft Belt Squat,"¥2,200,000",0,¥0,https://gym80.de/en/product/4360/,Precor Deadlift Eliteやラック構成と要調整。採用なら台数1,1955,1585,1490,高,4360
+プレートロード,脚尻,ペンデュラムスクワットを入れる,B-15 プレートロード,gym80,Pure Kraft Pendulum Squat,"¥2,400,000",0,¥0,https://gym80.de/en/product/4353n/,ハックスクワットとの比較候補。採用なら台数1,1068,2421,1733,高,4353N
+プレートロード,腕,バイセップカールを入れる,B-16 プレートロード,gym80,Pure Kraft Biceps Curl Dual,"¥1,600,000",1,"¥1,600,000",https://www.gym80.co.uk/products/pure-kraft-biceps-curl-dual,二頭専用。腕を鍛え切れる感を出す,946,1530,1243,高,4355
+プレートロード,腕,トライセップスエクステンションを入れる,B-17 プレートロード,gym80,Pure Kraft Triceps Extension,"¥1,600,000",1,"¥1,600,000",https://gym80.de/en/product/4356/,三頭専用。カールとは分けて導入,1179,1279,1493,高,4339N
+プレートロード,背中,背中を低コストで強化する,B-18 プレートロード,ECOLECO FITNESS,ELC シーテッドロウ,"¥294,000",0,¥0,https://ecoleco-fitness.com/expert-model/plate-load/elc-series,Arsenal/gym80が高い場合の代替候補,1567,2084,1605,高,ELC-07
+プレートロード,肩,肩を低コストで強化する,B-19 プレートロード,ECOLECO FITNESS,ELC ラテラルレイズ,"¥294,000",0,¥0,https://ecoleco-fitness.com/expert-model/plate-load/elc-series,gym80が高い場合の代替候補,1200,1500,1500,低,ELCラテラル。仮寸法
+レジスタンスマシン,,,,,,,,,,,,,,,
+レジスタンスマシン,脚,レッグエクステンションを高級化する,C-01 レジスタンス,Hammer Strength,Hammer Strength Select Leg Extension,"¥1,300,000",0,¥0,https://www.lifefitness.com/en-us/catalog/strength-training/selectorized/hammer-strength-select,gym80 Leg Extensionを入れる場合は不要,1040,1190,1630,高,HS Select LE
+レジスタンスマシン,脚,レッグカールを高級化する,C-02 レジスタンス,Hammer Strength,Hammer Strength Select Leg Curl,"¥1,300,000",0,¥0,https://www.lifefitness.com/en-us/catalog/strength-training/selectorized/hammer-strength-select,gym80 Lying Leg Curlを入れる場合は不要,1040,1190,1630,中,HS Select Leg Curl近似
+レジスタンスマシン,腹筋,アブドミナルを入れる,C-03 レジスタンス,Hammer Strength,Abdominal Crunch,"¥1,300,000",1,"¥1,300,000",https://www.lifefitness.com/en-us/catalog/strength-training/selectorized/hammer-strength-select,初心者にも分かりやすい腹筋マシン,1100,1200,1500,低,HS Abdominal要確認
+レジスタンスマシン,腕,アシストチンディップを入れる,C-04 レジスタンス,Hammer Strength,Assist Dip Chin,"¥1,300,000",1,"¥1,300,000",https://www.lifefitness.com/en-us/catalog/strength-training/selectorized/hammer-strength-select,初心者向け懸垂・ディップス,1200,1400,2100,低,Assist Dip Chin要確認
+レジスタンスマシン,胸,チェストプレスを高級化する,C-05 レジスタンス,Life Fitness,Insignia Series Chest Press,"¥1,600,000",0,¥0,https://www.lifefitness.com/en-hk/catalog/strength-training/selectorized/insignia-series-chest-press,胸は既存設備と重複しやすいため優先低め,1400,1500,1800,低,Insignia Chest要確認
+レジスタンスマシン,尻,,,Panatta,Standing Abductor,,,,https://www.panattasport.com/it/fit-evo/standing-abductor-machine/,,1200,1500,1600,低,Standing Abductor要確認
+有酸素,,,,,,,,,,,,,,,
+有酸素,HYROX,スキーエルゴを入れる,D-01 有酸素,Concept2,SkiErg PM5 スタンド付,"¥205,000",1,"¥205,000",https://www.concept2.com/ergs/skierg,HYROX感・省スペース,600,1270,2160,高,SkiErg+stand
+有酸素,HYROX,ローエルゴを入れる,D-02 有酸素,Concept2,RowErg,"¥190,000",1,"¥190,000",https://www.concept2.com/ergs/rowerg,HYROX補完。面積確認,610,2440,860,高,RowErg
+有酸素,HYROX,バイクエルゴを入れる,D-03 有酸素,Concept2,BikeErg,"¥180,000",0,¥0,https://www.concept2.com/ergs/bikeerg,採用なら台数1,610,1220,1030,高,BikeErg
+有酸素,HIIT,パワーマックスを入れる,D-04 有酸素,KONAMI,POWER MAX V3 Pro,"¥1,200,000",1,"¥1,200,000",https://www.konami.com/sportsclub/online/shop/aerobike/power-max-v3/,競技者・無酸素パワー向け,600,1030,820,高,POWER MAX V3
+有酸素,階段,パワーミルを入れる,D-05 有酸素,Life Fitness,PowerMill Climber,"¥2,200,000",1,"¥2,200,000",https://www.lifefitness.com/en-us/catalog/cardio/stair-climbers-stepper-machines/powermill-climber,階段系の本命。女性・減量層にも強い,840,1430,2100,高,PowerMill
+有酸素,階段,クライムミルを入れる,D-06 有酸素,Matrix Fitness,C50 ClimbMill,"¥1,800,000",0,¥0,https://world.matrixfitness.com/eng/home/climbmills/c50,PowerMillとの比較候補,720,1350,1910,高,Matrix C50
+有酸素,階段,ステップミルを入れる,D-07 有酸素,StairMaster,10G StepMill,"¥2,700,000",0,¥0,https://www.corehandf.com/collections/stairmaster,天井高確認必須,860,1600,2060,高,StairMaster 10G
+有酸素,ランニング,自走式トレッドミルを入れる,D-08 有酸素,WOODWAY,Curve Treadmill,"¥2,000,000",1,"¥2,000,000",https://www.woodway.com/treadmills/curve/,海外ジム感・映え・HIIT対応,840,1780,1830,高,WOODWAY Curve
+有酸素,24時間ジム向け,通常トレッドミルを更新する,D-09 有酸素,Life Fitness,Integrity+ Treadmill,"¥1,800,000",0,¥0,https://www.lifefitness.com/en-us/catalog/cardio/treadmills,既存更新用,900,2100,1600,低,Integrity+ TM要確認
+有酸素,24時間ジム向け,クロストレーナーを更新する,D-10 有酸素,Life Fitness,Integrity+ Cross Trainer,"¥1,500,000",0,¥0,https://www.lifefitness.com/en-us/catalog/cardio/ellipticals,既存更新用,700,2000,1700,低,Integrity+ XT要確認
+備品,,,,,,,,,,,,,,,
+備品,競技用ベンチ,競技用ベンチ台を追加する,E-01 備品,ONI,ONI 鬼コンボラック IPF公認,"¥380,000",1,"¥380,000",https://bukiya.net/products/oni373a,既存BULLベンチに加えて1台追加,950,1400,2300,低,ONI想定
+備品,ベンチ,フラットベンチを追加する,E-02 備品,EVOLGEAR,フラットベンチ EVRB-C135,"¥33,350",1,"¥33,350",https://evolgear.com/product/evrb-c135.html,フリーウェイト周辺の備品,650,1400,450,中,EVRB-C135要確認
+備品,バー,オリンピックバーを追加する,E-03 備品,EVOLGEAR,オリンピックバー EVA-5000,"¥37,950",2,"¥75,900",https://evolgear.com/product/eva-5000.html,ラック増設に伴う備品,50,2200,50,高,バー長約2200
+備品,収納,プレートツリーを追加する,E-04 備品,EVOLGEAR,プレートツリー EVRB-C154,"¥47,150",2,"¥94,300",https://evolgear.com/product/evrb-c154.html,プレート収納用,600,600,1500,中,プレートツリー目安
+備品,補助器具,デッドリフト補助を入れる,E-05 備品,Rogue,Rogue Deadlift Jack,"¥80,000",1,"¥80,000",https://www.roguefitness.com/rogue-deadlift-jack,高重量利用者向け,400,800,400,低,Deadlift Jack目安
+備品,HYROX,ウォールボールを入れる,E-06 備品,Rogue / 同等品,Wall Ball,"¥30,000",6,"¥180,000",https://www.roguefitness.com/medicine-balls,HYROX備品,350,350,350,低,Wall Ball単体
+備品,HYROX,ケトルベルを入れる,E-07 備品,Rogue / 同等品,Kettlebell Set,"¥300,000",1,"¥300,000",https://www.roguefitness.com/rogue-kettlebells,HYROX・ファンクショナル用,800,600,500,低,KBセット占有目安
+備品,収納,アタッチメントを整理する,E-08 備品,EVOLGEAR,アタッチメントラック,"¥100,000",1,"¥100,000",https://evolgear.com/,ケーブル周辺整理。MAGグリップ用,600,400,1800,低,アタッチメントラック目安
+ストロングマン,,,,,,,,,,,,,,,
+ストロングマン,タイヤ,タイヤフリップを入れる,F-01 ストロングマン,Rogue / 同等品,Tire Flip / Strongman Tire,"¥500,000",1,"¥500,000",https://warriors-gym.com/en/facility/,WARRIORS GYM参考。省スペース・安全性を見て代替器具も検討,1200,1200,430,低,タイヤ推定
+ストロングマン,スレッド,スレッドプッシュを入れる,F-02 ストロングマン,Rogue,Dog Sled 1.2,"¥250,000",1,"¥250,000",https://www.roguefitness.com/dog-sled,HYROX/ストロングマン兼用。人工芝レーンが必要,610,1016,1003,高,Dog Sled
+ストロングマン,ファーマーズ,ファーマーズキャリーを入れる,F-03 ストロングマン,Rogue,Farmer's Walk Handles,"¥160,000",1,"¥160,000",https://www.roguefitness.com/strongman/logs-axles-handles,グリップ・体幹・全身系。場所を取りにくい,610,1524,254,低,Farmers目安
+ストロングマン,ログ,ログプレスを入れる,F-04 ストロングマン,Rogue,LB-1 Rogue 10 inch Log Bar,"¥200,000",1,"¥200,000",https://www.roguefitness.com/log-bar,話題性あり。利用者は限定的,254,1956,254,高,Log Bar
+ストロングマン,ヨーク,ヨークを入れる,F-05 ストロングマン,Rogue,Y-2 Yoke,"¥300,000",0,¥0,https://www.roguefitness.com/rogue-yoke,スペースを取るため候補扱い,1700,1700,2300,低,Yoke目安
+ストロングマン,サンドバッグ,サンドバッグランジを入れる,F-06 ストロングマン,Rogue / 同等品,Strongman Sandbag Set,"¥250,000",1,"¥250,000",https://www.roguefitness.com/rogue-sandbags,HYROX・ストロングマン兼用,406,406,394,低,Sandbag目安

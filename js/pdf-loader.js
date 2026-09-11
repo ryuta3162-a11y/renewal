@@ -43,6 +43,18 @@ export async function pdfToDataUrl(url, pageNum = 1, scale = 2) {
   };
 }
 
+/** File / ArrayBuffer からPDFを画像化 */
+export async function pdfBufferToDataUrl(buffer, pageNum = 1, scale = 2) {
+  const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const rendered = await renderPdfPage(doc, pageNum, scale);
+  return {
+    dataUrl: rendered.dataUrl,
+    width: rendered.width,
+    height: rendered.height,
+    numPages: doc.numPages,
+  };
+}
+
 /** 複数ページPDFを縦に連結して1枚の画像にする */
 export async function pdfToStackedDataUrl(url, scale = 2, gap = PAGE_GAP) {
   const doc = await openPdfDocument(url);
